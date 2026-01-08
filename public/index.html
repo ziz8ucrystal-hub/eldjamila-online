@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="fr" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>El Djamila - Salon de Coiffure</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="css2.css">
+    
+    <!-- Socket.io Client -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    
+    <style>
+        /* Styles pour messages */
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .error-message, .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: white;
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            animation: slideIn 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            max-width: 400px;
+        }
+        
+        .error-message {
+            background: linear-gradient(135deg, #ff4444, #cc0000);
+            border-left: 5px solid #ff0000;
+        }
+        
+        .notification {
+            background: linear-gradient(135deg, #4CAF50, #2E7D32);
+            border-left: 5px solid #2E7D32;
+        }
+        
+        .error-message button, .notification button {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 20px;
+            padding: 0;
+            margin-left: 10px;
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .text-center {
+            text-align: center;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- Pages d'authentification -->
+    <!-- Page de connexion -->
+    <div class="auth-page active" id="loginPage">
+        <div class="auth-container">
+            <div class="auth-card">
+                <div class="auth-logo">
+                    <div class="app-name">
+                        <i class="fas fa-spa"></i>
+                        El Djamila
+                    </div>
+                </div>
+                
+                <h2 class="auth-title">Connexion</h2>
+                <p class="auth-subtitle">Connectez-vous à votre compte pour accéder à toutes les fonctionnalités</p>
+                
+                <div class="input-group">
+                    <label class="input-label">Email</label>
+                    <input type="email" class="input-field" id="loginEmail" placeholder="votre@email.com">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Mot de passe</label>
+                    <input type="password" class="input-field" id="loginPassword" placeholder="••••••••">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label" style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="adminLogin">
+                        <span>Connexion en tant qu'administrateur</span>
+                    </label>
+                </div>
+                
+                <button class="btn btn-primary btn-full" id="loginBtn">
+                    <i class="fas fa-sign-in-alt btn-icon"></i>
+                    Se connecter
+                </button>
+                
+                <div class="auth-footer">
+                    Pas encore de compte? <a href="#" class="auth-link" id="goToRegister">S'inscrire</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Page d'inscription -->
+    <div class="auth-page" id="registerPage">
+        <div class="auth-container">
+            <div class="auth-card">
+                <div class="auth-logo">
+                    <div class="app-name">
+                        <i class="fas fa-spa"></i>
+                        El Djamila
+                    </div>
+                </div>
+                
+                <h2 class="auth-title">Inscription</h2>
+                <p class="auth-subtitle">Créez votre compte pour réserver des prestations et participer aux concours</p>
+                
+                <div class="input-group">
+                    <label class="input-label">Nom complet</label>
+                    <input type="text" class="input-field" id="registerName" placeholder="Votre nom">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Email</label>
+                    <input type="email" class="input-field" id="registerEmail" placeholder="votre@email.com">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Mot de passe</label>
+                    <input type="password" class="input-field" id="registerPassword" placeholder="6 caractères minimum">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Confirmer le mot de passe</label>
+                    <input type="password" class="input-field" id="registerConfirmPassword" placeholder="Répétez le mot de passe">
+                </div>
+                
+                <button class="btn btn-primary btn-full" id="registerBtn">
+                    <i class="fas fa-user-plus btn-icon"></i>
+                    S'inscrire
+                </button>
+                
+                <div class="auth-footer">
+                    Déjà un compte? <a href="#" class="auth-link" id="goToLogin">Se connecter</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Application principale -->
+    <!-- Header -->
+    <div class="status-bar" id="mainHeader" style="display: none;">
+        <div class="balance-display">
+            <i class="fas fa-wallet"></i>
+            <span id="balanceAmount">€0.00</span>
+        </div>
+        
+        <a href="#" class="app-name" onclick="switchPage('home'); return false;">
+            <i class="fas fa-spa"></i>
+            El Djamila
+        </a>
+        
+        <div class="user-menu">
+            <div class="user-avatar" id="userAvatar">U</div>
+            <button class="settings-btn" id="settingsBtn">
+                <i class="fas fa-cog"></i>
+            </button>
+        </div>
+        
+        <!-- Menu utilisateur -->
+        <div class="user-dropdown" id="userDropdown">
+            <a href="#" class="user-dropdown-item" onclick="switchPage('profile'); return false;">
+                <i class="fas fa-user"></i>
+                <span>Mon Profil</span>
+            </a>
+            <a href="#" class="user-dropdown-item" onclick="switchPage('offers'); return false;">
+                <i class="fas fa-gift"></i>
+                <span>Mes Réservations</span>
+            </a>
+            <a href="#" class="user-dropdown-item admin-only" onclick="switchPage('admin'); return false;">
+                <i class="fas fa-crown"></i>
+                <span>Panneau Admin</span>
+            </a>
+            <a href="#" class="user-dropdown-item" id="logoutBtn">
+                <i class="fas fa-sign-out-alt"></i>
+                <span>Déconnexion</span>
+            </a>
+        </div>
+    </div>
+    
+    <!-- Pages principales -->
+    <!-- Page d'accueil -->
+    <div class="page" id="homePage">
+        <div class="main-content">
+            <h1 class="page-title">Bienvenue chez El Djamila</h1>
+            <p class="page-description">Salon de coiffure féminin élégant. Découvrez nos prestations exclusives, séances en direct et concours.</p>
+            
+            <div class="section">
+                <div class="cards-container" id="homeOffersContainer">
+                    <!-- Les offres seront chargées automatiquement -->
+                    <div class="card empty-state">
+                        <i class="fas fa-spinner loading-spinner"></i>
+                        <h3>Chargement des offres...</h3>
+                        <p>Veuillez patienter un instant</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2 class="page-title">Catégories</h2>
+                <div class="cards-container">
+                    <div class="card" onclick="switchPage('offers'); return false;" style="cursor: pointer;">
+                        <div class="card-content text-center">
+                            <i class="fas fa-scissors service-icon" style="font-size: 24px; margin-bottom: 10px;"></i>
+                            <h3 class="service-name">Toutes les Prestations</h3>
+                            <p style="font-size: 12px; color: var(--gray);">Découvrez toutes nos offres spéciales</p>
+                        </div>
+                    </div>
+                    
+                    <div class="card" onclick="switchPage('live'); return false;" style="cursor: pointer;">
+                        <div class="card-content text-center">
+                            <i class="fas fa-video service-icon" style="font-size: 24px; margin-bottom: 10px;"></i>
+                            <h3 class="service-name">Séances en Direct</h3>
+                            <p style="font-size: 12px; color: var(--gray);">Apprenez avec nos tutoriels live</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Page des offres -->
+    <div class="page" id="offersPage">
+        <div class="main-content">
+            <h1 class="page-title">Nos Prestations</h1>
+            <p class="page-description">Découvrez nos prestations exclusives et réservez votre rendez-vous.</p>
+            
+            <div class="cards-container" id="offersContainer">
+                <!-- Les offres seront chargées automatiquement -->
+                <div class="card empty-state">
+                    <i class="fas fa-spinner loading-spinner"></i>
+                    <h3>Chargement des prestations...</h3>
+                    <p>Veuillez patienter un instant</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bouton FAB pour admin -->
+        <button class="fab admin-only" id="fabBtn" style="display: none;">
+            <i class="fas fa-plus"></i>
+        </button>
+    </div>
+    
+    <!-- Page Live & Concours -->
+    <div class="page" id="livePage">
+        <div class="main-content">
+            <h1 class="page-title">Séances & Concours</h1>
+            <p class="page-description">Participez à nos séances en direct et concours exclusifs.</p>
+            
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="live">Séances en direct</button>
+                <button class="tab-btn" data-tab="contests">Concours</button>
+            </div>
+            
+            <div class="cards-container" id="liveContainer">
+                <div class="card empty-state">
+                    <i class="fas fa-spinner loading-spinner"></i>
+                    <h3>Chargement des séances...</h3>
+                    <p>Veuillez patienter un instant</p>
+                </div>
+            </div>
+            
+            <div class="cards-container hidden" id="contestsContainer">
+                <div class="card empty-state">
+                    <i class="fas fa-spinner loading-spinner"></i>
+                    <h3>Chargement des concours...</h3>
+                    <p>Veuillez patienter un instant</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Page Portefeuille -->
+    <div class="page" id="paymentPage">
+        <div class="main-content">
+            <h1 class="page-title">Portefeuille</h1>
+            <p class="page-description">Gérez votre solde et utilisez vos points pour payer.</p>
+            
+            <div class="cards-container">
+                <div class="card payment-card">
+                    <h3>Votre solde</h3>
+                    <div class="payment-amount">€<span id="userBalance">0</span></div>
+                    
+                    <div class="payment-input-container">
+                        <input type="number" class="payment-input" id="chargeAmount" placeholder="Montant" min="1" step="0.01">
+                        <button class="payment-btn" id="chargeBtn">Recharger</button>
+                    </div>
+                    
+                    <p>Vos points: <strong id="userPoints">0</strong> points</p>
+                    <p style="font-size: 12px; opacity: 0.9; margin-top: 8px;">1 point = €1. Utilisez vos points pour payer les prestations.</p>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Historique des transactions</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="empty-state">
+                            <i class="fas fa-exchange-alt"></i>
+                            <h3>Aucune transaction</h3>
+                            <p>Votre historique de transactions apparaîtra ici</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Page Profil -->
+    <div class="page" id="profilePage">
+        <div class="main-content">
+            <div class="profile-header">
+                <div class="profile-avatar" id="profileAvatar">U</div>
+                <h2 class="profile-name" id="profileName">Utilisateur</h2>
+                <p class="profile-email" id="profileEmail">utilisateur@email.com</p>
+                <div id="adminBadgeContainer"></div>
+            </div>
+            
+            <div class="profile-stats">
+                <div class="stat-card">
+                    <div class="stat-number">0</div>
+                    <div class="stat-label">Réservations</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="profileBalance">€0</div>
+                    <div class="stat-label">Solde</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="profilePoints">0</div>
+                    <div class="stat-label">Points</div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2 class="page-title">Informations personnelles</h2>
+                <div class="card">
+                    <div class="card-content">
+                        <div class="input-group">
+                            <label class="input-label">Nom complet</label>
+                            <input type="text" class="input-field" id="profileNameInput" placeholder="Votre nom">
+                        </div>
+                        
+                        <div class="input-group">
+                            <label class="input-label">Email</label>
+                            <input type="email" class="input-field" id="profileEmailInput" placeholder="votre@email.com" readonly>
+                        </div>
+                        
+                        <div class="input-group">
+                            <label class="input-label">Téléphone</label>
+                            <input type="tel" class="input-field" id="profilePhone" placeholder="+33 1 23 45 67 89">
+                        </div>
+                        
+                        <button class="btn btn-primary btn-full mt-16" id="saveProfileBtn">
+                            <i class="fas fa-save btn-icon"></i>
+                            Enregistrer les modifications
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Page Admin -->
+    <div class="page" id="adminPage">
+        <div class="main-content">
+            <h1 class="page-title">Panneau Administrateur <span class="admin-badge">ADMIN</span></h1>
+            <p class="page-description">Gérez les prestations, séances en direct, concours et utilisateurs.</p>
+            
+            <div class="admin-actions">
+                <div class="admin-action-card" onclick="switchPage('offers'); return false;">
+                    <i class="fas fa-gift"></i>
+                    <h3>Gérer les Prestations</h3>
+                </div>
+                
+                <div class="admin-action-card" onclick="switchPage('live'); return false;">
+                    <i class="fas fa-video"></i>
+                    <h3>Séances en Direct</h3>
+                </div>
+                
+                <div class="admin-action-card" id="manageUsersBtn">
+                    <i class="fas fa-users"></i>
+                    <h3>Gérer les Utilisateurs</h3>
+                </div>
+                
+                <div class="admin-action-card" id="viewStatsBtn">
+                    <i class="fas fa-chart-bar"></i>
+                    <h3>Statistiques</h3>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2 class="page-title">Statistiques rapides</h2>
+                <div class="profile-stats">
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalOffers">0</div>
+                        <div class="stat-label">Prestations</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalUsers">1</div>
+                        <div class="stat-label">Utilisateurs</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalRevenue">€0</div>
+                        <div class="stat-label">Revenus</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2 class="page-title">Dernières activités</h2>
+                <div class="card">
+                    <div class="card-content">
+                        <div class="empty-state">
+                            <i class="fas fa-history"></i>
+                            <h3>Aucune activité récente</h3>
+                            <p>Les activités apparaîtront ici</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Navigation bas -->
+    <div class="bottom-nav" id="bottomNav" style="display: none;">
+        <a href="#" class="nav-item active" data-page="home">
+            <i class="fas fa-home"></i>
+            <span>Accueil</span>
+        </a>
+        <a href="#" class="nav-item" data-page="offers">
+            <i class="fas fa-gift"></i>
+            <span>Prestations</span>
+        </a>
+        <a href="#" class="nav-item" data-page="live">
+            <i class="fas fa-video"></i>
+            <span>Séances</span>
+        </a>
+        <a href="#" class="nav-item" data-page="payment">
+            <i class="fas fa-wallet"></i>
+            <span>Portefeuille</span>
+        </a>
+    </div>
+    
+    <!-- Modals -->
+    <!-- Modal Ajouter offre -->
+    <div class="modal" id="addOfferModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Ajouter une prestation</h2>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label class="input-label">Nom de la prestation</label>
+                    <input type="text" class="input-field" id="offerName" placeholder="Ex: Balayage premium">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Type de prestation</label>
+                    <select class="select-field" id="offerType">
+                        <option value="">Sélectionner un type</option>
+                        <option value="Coiffure">Coiffure</option>
+                        <option value="Couleur">Couleur</option>
+                        <option value="Soin">Soin</option>
+                        <option value="Coiffure de mariage">Coiffure de mariage</option>
+                        <option value="Autre">Autre</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Prix Original (€)</label>
+                    <input type="number" class="input-field" id="originalPrice" placeholder="0.00" step="0.01">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Prix Promo (€) - Optionnel</label>
+                    <input type="number" class="input-field" id="offerPrice" placeholder="Laisser vide si pas de promo" step="0.01">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Description</label>
+                    <textarea class="textarea-field" id="offerDescription" placeholder="Décrivez votre prestation..."></textarea>
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">URL de l'image (Optionnel)</label>
+                    <input type="text" class="input-field" id="offerImage" placeholder="https://exemple.com/image.jpg">
+                    <p style="font-size: 11px; color: var(--gray); margin-top: 4px;">Laissez vide pour utiliser une image par défaut</p>
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Badge Promo (Optionnel)</label>
+                    <select class="select-field" id="promoBadge">
+                        <option value="">Aucun badge</option>
+                        <option value="PROMO">PROMO</option>
+                        <option value="TOP">TOP</option>
+                        <option value="NOUVEAU">NOUVEAU</option>
+                        <option value="LIMITÉ">LIMITÉ</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-full" id="cancelOfferBtn">Annuler</button>
+                <button class="btn btn-primary btn-full" id="saveOfferBtn">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal Démarrer Live -->
+    <div class="modal" id="startLiveModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Démarrer une séance en direct</h2>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label class="input-label">Titre de la séance</label>
+                    <input type="text" class="input-field" id="liveTitle" placeholder="Ex: Tutoriel coiffures d'été">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Description</label>
+                    <textarea class="textarea-field" id="liveDescription" placeholder="Que couvrirez-vous dans cette séance?"></textarea>
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Horaire (Optionnel)</label>
+                    <input type="datetime-local" class="input-field" id="liveSchedule">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-full" id="cancelLiveBtn">Annuler</button>
+                <button class="btn btn-primary btn-full" id="goLiveBtn">Démarrer maintenant</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal Créer Concours -->
+    <div class="modal" id="createContestModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Créer un concours</h2>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label class="input-label">Nom du concours</label>
+                    <input type="text" class="input-field" id="contestName" placeholder="Ex: Meilleure coiffure d'été">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Description</label>
+                    <textarea class="textarea-field" id="contestDescription" placeholder="Décrivez les règles du concours et les prix..."></textarea>
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Date de fin</label>
+                    <input type="date" class="input-field" id="contestEndDate">
+                </div>
+                
+                <div class="input-group">
+                    <label class="input-label">Prix</label>
+                    <input type="text" class="input-field" id="contestPrize" placeholder="Ex: Soin capillaire gratuit">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-full" id="cancelContestBtn">Annuler</button>
+                <button class="btn btn-primary btn-full" id="saveContestBtn">Créer le concours</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Menu Paramètres -->
+    <div class="settings-menu" id="settingsMenu">
+        <div class="language-selector">
+            <div class="language-title">Langue / Language</div>
+            <div class="language-options">
+                <button class="lang-btn active" data-lang="fr">Français</button>
+                <button class="lang-btn" data-lang="en">English</button>
+                <button class="lang-btn" data-lang="ar">العربية</button>
+            </div>
+        </div>
+        
+        <a href="#" class="settings-item" onclick="switchPage('profile'); return false;">
+            <i class="fas fa-user"></i>
+            <span>Profil</span>
+        </a>
+        <a href="#" class="settings-item" onclick="switchPage('payment'); return false;">
+            <i class="fas fa-wallet"></i>
+            <span>Portefeuille</span>
+        </a>
+        <a href="#" class="settings-item admin-only" onclick="switchPage('admin'); return false;">
+            <i class="fas fa-crown"></i>
+            <span>Panneau Admin</span>
+        </a>
+        <a href="#" class="settings-item">
+            <i class="fas fa-bell"></i>
+            <span>Notifications</span>
+        </a>
+        <a href="#" class="settings-item">
+            <i class="fas fa-question-circle"></i>
+            <span>Aide & Support</span>
+        </a>
+        <a href="#" class="settings-item" id="logoutSidebarBtn">
+            <i class="fas fa-sign-out-alt"></i>
+            <span>Déconnexion</span>
+        </a>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
