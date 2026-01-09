@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "mongodb": "^6.3.0",                    // ⬅️ أرجع 6.3.0 لأن Node 24 يدعمه
+    "mongodb": "^6.3.0",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "cors": "^2.8.5",
@@ -21,7 +21,7 @@
     "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": "20.x"                         // ⬅️ غيّر إلى 20.x أو 24.x
+    "node": "24.x"                         // ⬅️ غيّر إلى 24.x فقط!
   },
   "keywords": ["eldjamila", "salon", "coiffure", "reservation"],
   "author": "El Djamila",
