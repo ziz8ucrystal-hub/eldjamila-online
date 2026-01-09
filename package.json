@@ -1,7 +1,7 @@
 {
   "name": "eldjamila-online",
   "version": "1.0.0",
-  "description": "El Djamila Salon de Coiffure",
+  "description": "El Djamila - Salon de coiffure",
   "main": "api/index.js",
   "scripts": {
     "start": "node api/index.js",
@@ -19,11 +19,7 @@
   "engines": {
     "node": "24.x"
   },
-  "keywords": [
-    "eldjamila",
-    "salon",
-    "coiffure"
-  ],
+  "keywords": ["eldjamila", "salon", "coiffure", "reservation"],
   "author": "El Djamila",
   "license": "ISC"
 }
