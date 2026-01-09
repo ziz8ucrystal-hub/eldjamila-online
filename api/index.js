@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
-// ========== CONFIGURATION ==========
+// ========== CONFIGURATION =========
 app.use(helmet({
     contentSecurityPolicy: false
 }));
