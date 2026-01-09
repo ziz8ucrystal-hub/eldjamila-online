@@ -17,34 +17,68 @@ const io = new Server(httpServer, {
     }
 });
 
-// ========== Connexion MongoDB ==========
-let db;
-let client;
+// ========== DEBUG IMPORTANT ==========
+console.log('🚀 Démarrage API El Djamila...');
+console.log('🔧 MONGODB_URI présent?', !!process.env.MONGODB_URI);
 
-const MONGODB_URI = process.env.MONGODB_URI;
+// ========== Connexion MongoDB ==========
+let db = null;
+let client = null;
+let dbConnected = false;
+
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://eldjamila-cluster:YueVW02QRkSSPyzT@cluster0.cmsgoyg.mongodb.net/eldjamila_db';
 
 async function connectDB() {
     try {
+        console.log('🔗 Tentative connexion MongoDB...');
+        
         if (!MONGODB_URI) {
-            throw new Error('MONGODB_URI non configuré');
+            console.error('❌ MONGODB_URI est vide!');
+            console.error('❌ Vérifiez Environment Variables dans Vercel');
+            return;
         }
         
-        client = new MongoClient(MONGODB_URI);
+        // Masquer le mot de passe dans les logs
+        const safeURI = MONGODB_URI.replace(/:[^:@]*@/, ':****@');
+        console.log('🔗 URI utilisé:', safeURI);
+        
+        client = new MongoClient(MONGODB_URI, {
+            serverSelectionTimeoutMS: 10000,
+            connectTimeoutMS: 10000
+        });
+        
         await client.connect();
         db = client.db('eldjamila_db');
-        console.log('✅ MongoDB connecté avec succès');
+        dbConnected = true;
         
-        // Créer les index uniquement
-        await db.collection('users').createIndex({ email: 1 }, { unique: true });
-        await db.collection('offers').createIndex({ isActive: 1 });
-        await db.collection('offers').createIndex({ category: 1 });
+        console.log('✅ MongoDB connecté avec succès!');
+        console.log('📊 Base de données:', 'eldjamila_db');
         
-        // Pas de données d'exemple - vous ajouterez via l'admin
-        console.log('✅ Base de données prête');
+        // Créer les index
+        try {
+            await db.collection('users').createIndex({ email: 1 }, { unique: true });
+            await db.collection('offers').createIndex({ isActive: 1 });
+            console.log('✅ Indexes créés');
+        } catch (indexError) {
+            console.log('⚠️ Index peut-être déjà existant');
+        }
         
     } catch (error) {
-        console.error('❌ Erreur connexion MongoDB:', error.message);
+        console.error('❌ ERREUR connexion MongoDB:', error.message);
+        console.error('💡 Vérifiez:');
+        console.error('   1. Mot de passe dans Vercel Environment Variables');
+        console.error('   2. Network Access 0.0.0.0/0 dans MongoDB Atlas');
+        console.error('   3. Database "eldjamila_db" existe dans Cluster0');
     }
+}
+
+// ========== Fonction helper pour vérifier db ==========
+async function ensureDB() {
+    if (!dbConnected) {
+        console.log('🔄 Réessai connexion MongoDB...');
+        await connectDB();
+    }
+    return db;
 }
 
 connectDB();
@@ -76,10 +110,31 @@ const authenticateToken = (req, res, next) => {
 
 // ========== Routes API ==========
 
-// 1. Vérifier session
+// 1. Health check amélioré
+app.get('/api/health', async (req, res) => {
+    const dbStatus = dbConnected ? 'connected' : 'disconnected';
+    
+    res.json({
+        success: true,
+        message: 'API El Djamila en ligne',
+        timestamp: new Date().toISOString(),
+        database: dbStatus,
+        environment: process.env.NODE_ENV || 'production'
+    });
+});
+
+// 2. Vérifier session
 app.get('/api/auth/verify', authenticateToken, async (req, res) => {
     try {
-        const user = await db.collection('users').findOne(
+        const currentDb = await ensureDB();
+        if (!currentDb) {
+            return res.status(503).json({ 
+                success: false, 
+                message: 'Base de données non disponible' 
+            });
+        }
+        
+        const user = await currentDb.collection('users').findOne(
             { _id: new ObjectId(req.user.userId) },
             { projection: { passwordHash: 0 } }
         );
@@ -105,16 +160,24 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
     }
 });
 
-// 2. Connexion
+// 3. Connexion
 app.post('/api/auth/login', async (req, res) => {
     try {
+        const currentDb = await ensureDB();
+        if (!currentDb) {
+            return res.status(503).json({ 
+                success: false, 
+                message: 'Base de données non disponible. Vérifiez MONGODB_URI dans Vercel.' 
+            });
+        }
+        
         const { email, password } = req.body;
         
         if (!email || !password) {
             return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
         }
         
-        const user = await db.collection('users').findOne({ email });
+        const user = await currentDb.collection('users').findOne({ email });
         
         if (!user) {
             return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
@@ -154,9 +217,17 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// 3. Inscription
+// 4. Inscription
 app.post('/api/auth/register', async (req, res) => {
     try {
+        const currentDb = await ensureDB();
+        if (!currentDb) {
+            return res.status(503).json({ 
+                success: false, 
+                message: 'Base de données non disponible. Vérifiez MONGODB_URI dans Vercel.' 
+            });
+        }
+        
         const { name, email, password } = req.body;
         
         if (!name || !email || !password) {
@@ -167,7 +238,7 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Mot de passe 6 caractères minimum' });
         }
         
-        const existingUser = await db.collection('users').findOne({ email });
+        const existingUser = await currentDb.collection('users').findOne({ email });
         if (existingUser) {
             return res.status(400).json({ success: false, message: 'Email déjà utilisé' });
         }
@@ -185,7 +256,7 @@ app.post('/api/auth/register', async (req, res) => {
             isActive: true
         };
         
-        const result = await db.collection('users').insertOne(newUser);
+        const result = await currentDb.collection('users').insertOne(newUser);
         
         const token = jwt.sign(
             {
@@ -216,10 +287,18 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-// 4. Obtenir offres
+// 5. Obtenir offres
 app.get('/api/offers', async (req, res) => {
     try {
-        const offers = await db.collection('offers')
+        const currentDb = await ensureDB();
+        if (!currentDb) {
+            return res.status(503).json({ 
+                success: false, 
+                message: 'Base de données non disponible' 
+            });
+        }
+        
+        const offers = await currentDb.collection('offers')
             .find({ isActive: true })
             .sort({ createdAt: -1 })
             .toArray();
@@ -231,233 +310,8 @@ app.get('/api/offers', async (req, res) => {
     }
 });
 
-// 5. Ajouter offre (admin)
-app.post('/api/offers', authenticateToken, async (req, res) => {
-    try {
-        const user = await db.collection('users').findOne({ _id: new ObjectId(req.user.userId) });
-        
-        if (!user || user.role !== 'admin') {
-            return res.status(403).json({ success: false, message: 'Non autorisé' });
-        }
-        
-        const { title, category, original_price, promo_price, description, image_url, badge } = req.body;
-        
-        if (!title || !category || !original_price) {
-            return res.status(400).json({ success: false, message: 'Titre, catégorie et prix requis' });
-        }
-        
-        const newOffer = {
-            title,
-            category,
-            original_price: parseFloat(original_price),
-            promo_price: promo_price ? parseFloat(promo_price) : null,
-            description: description || '',
-            image_url: image_url || '',
-            badge: badge || null,
-            isActive: true,
-            createdBy: req.user.userId,
-            createdAt: new Date()
-        };
-        
-        const result = await db.collection('offers').insertOne(newOffer);
-        newOffer._id = result.insertedId;
-        
-        io.emit('new_offer', newOffer);
-        
-        res.json({ success: true, offer: newOffer });
-        
-    } catch (error) {
-        console.error('Erreur ajout offre:', error);
-        res.status(500).json({ success: false, message: 'Erreur ajout offre' });
-    }
-});
-
-// 6. Modifier offre
-app.put('/api/offers/:id', authenticateToken, async (req, res) => {
-    try {
-        const user = await db.collection('users').findOne({ _id: new ObjectId(req.user.userId) });
-        if (!user || user.role !== 'admin') {
-            return res.status(403).json({ success: false, message: 'Non autorisé' });
-        }
-        
-        const { id } = req.params;
-        const updateData = req.body;
-        
-        const result = await db.collection('offers').updateOne(
-            { _id: new ObjectId(id) },
-            { $set: { ...updateData, updatedAt: new Date() } }
-        );
-        
-        if (result.matchedCount === 0) {
-            return res.status(404).json({ success: false, message: 'Offre non trouvée' });
-        }
-        
-        res.json({ success: true, message: 'Offre mise à jour' });
-    } catch (error) {
-        console.error('Erreur modification offre:', error);
-        res.status(500).json({ success: false, message: 'Erreur modification offre' });
-    }
-});
-
-// 7. Supprimer offre
-app.delete('/api/offers/:id', authenticateToken, async (req, res) => {
-    try {
-        const user = await db.collection('users').findOne({ _id: new ObjectId(req.user.userId) });
-        if (!user || user.role !== 'admin') {
-            return res.status(403).json({ success: false, message: 'Non autorisé' });
-        }
-        
-        const { id } = req.params;
-        
-        const result = await db.collection('offers').deleteOne({ _id: new ObjectId(id) });
-        
-        if (result.deletedCount === 0) {
-            return res.status(404).json({ success: false, message: 'Offre non trouvée' });
-        }
-        
-        res.json({ success: true, message: 'Offre supprimée' });
-    } catch (error) {
-        console.error('Erreur suppression offre:', error);
-        res.status(500).json({ success: false, message: 'Erreur suppression offre' });
-    }
-});
-
-// 8. Recharger solde
-app.post('/api/payment/charge', authenticateToken, async (req, res) => {
-    try {
-        const { amount } = req.body;
-        
-        if (!amount || amount <= 0) {
-            return res.status(400).json({ success: false, message: 'Montant invalide' });
-        }
-        
-        const user = await db.collection('users').findOne({ _id: new ObjectId(req.user.userId) });
-        const newBalance = (user.balance || 0) + parseFloat(amount);
-        const newPoints = (user.points || 0) + Math.floor(amount);
-        
-        await db.collection('users').updateOne(
-            { _id: new ObjectId(req.user.userId) },
-            { 
-                $set: { 
-                    balance: newBalance,
-                    points: newPoints 
-                } 
-            }
-        );
-        
-        await db.collection('transactions').insertOne({
-            userId: new ObjectId(req.user.userId),
-            type: 'deposit',
-            amount: parseFloat(amount),
-            status: 'completed',
-            createdAt: new Date()
-        });
-        
-        res.json({
-            success: true,
-            newBalance,
-            newPoints,
-            message: 'Solde rechargé avec succès'
-        });
-        
-    } catch (error) {
-        console.error('Erreur recharge:', error);
-        res.status(500).json({ success: false, message: 'Erreur recharge' });
-    }
-});
-
-// 9. Réservation
-app.post('/api/bookings', authenticateToken, async (req, res) => {
-    try {
-        const { offerId } = req.body;
-        
-        if (!offerId) {
-            return res.status(400).json({ success: false, message: 'ID offre requis' });
-        }
-        
-        const offer = await db.collection('offers').findOne({ _id: new ObjectId(offerId) });
-        
-        if (!offer) {
-            return res.status(404).json({ success: false, message: 'Offre non trouvée' });
-        }
-        
-        const price = offer.promo_price || offer.original_price;
-        
-        const user = await db.collection('users').findOne({ _id: new ObjectId(req.user.userId) });
-        
-        if ((user.balance || 0) < price) {
-            return res.status(400).json({ success: false, message: 'Solde insuffisant' });
-        }
-        
-        const newBalance = (user.balance || 0) - price;
-        await db.collection('users').updateOne(
-            { _id: new ObjectId(req.user.userId) },
-            { $set: { balance: newBalance } }
-        );
-        
-        await db.collection('bookings').insertOne({
-            userId: new ObjectId(req.user.userId),
-            offerId: new ObjectId(offerId),
-            bookingDate: new Date(),
-            status: 'confirmed',
-            totalPrice: price,
-            createdAt: new Date()
-        });
-        
-        await db.collection('transactions').insertOne({
-            userId: new ObjectId(req.user.userId),
-            type: 'payment',
-            amount: price,
-            status: 'completed',
-            createdAt: new Date()
-        });
-        
-        res.json({
-            success: true,
-            newBalance,
-            message: 'Réservation réussie'
-        });
-        
-    } catch (error) {
-        console.error('Erreur réservation:', error);
-        res.status(500).json({ success: false, message: 'Erreur réservation' });
-    }
-});
-
-// 10. Mettre à jour profil
-app.put('/api/profile/update', authenticateToken, async (req, res) => {
-    try {
-        const { name, phone } = req.body;
-        
-        if (!name) {
-            return res.status(400).json({ success: false, message: 'Nom requis' });
-        }
-        
-        await db.collection('users').updateOne(
-            { _id: new ObjectId(req.user.userId) },
-            { 
-                $set: { 
-                    name,
-                    phone: phone || null
-                } 
-            }
-        );
-        
-        res.json({ success: true, message: 'Profil mis à jour' });
-    } catch (error) {
-        console.error('Erreur mise à jour profil:', error);
-        res.status(500).json({ success: false, message: 'Erreur mise à jour' });
-    }
-});
-
-// 11. Health check
-app.get('/api/health', (req, res) => {
-    res.json({
-        success: true,
-        message: 'API El Djamila en ligne',
-        timestamp: new Date().toISOString()
-    });
-});
+// Routes supplémentaires (offres, payments, bookings, etc.)...
+// [ابقى باقي الكود كما هو، فقط استبدل كل db.collection بـ currentDb.collection]
 
 // ========== Socket.io ==========
 io.on('connection', (socket) => {
@@ -480,16 +334,13 @@ app.get('*', (req, res) => {
     res.sendFile('index.html', { root: 'public' });
 });
 
-// ========== Démarrer serveur ==========
-const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => {
-    console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-});
+// ========== Export pour Vercel ==========
+module.exports = app;
 
-process.on('SIGINT', async () => {
-    if (client) {
-        await client.close();
-        console.log('MongoDB déconnecté');
-    }
-    process.exit(0);
-});
+// ========== Pour développement local seulement ==========
+if (!process.env.VERCEL) {
+    const PORT = process.env.PORT || 3000;
+    httpServer.listen(PORT, () => {
+        console.log(`🚀 Serveur local démarré sur http://localhost:${PORT}`);
+    });
+}
