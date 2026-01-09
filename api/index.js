@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -21,17 +21,17 @@ app.use(express.urlencoded({ extended: true }));
 
 console.log('🚀 API El Djamila - No SSL Version');
 
-// ========== MONGODB CONNECTION WITHOUT SSL ==========
+// ========== MONGODB CONNECTION ==========
 let db = null;
+let client = null;
 
-// IMPORTANT: Use this NO-SSL URI for Vercel
+// Use environment variable or direct connection string
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://eldjamila-cluster:YueVW02QRkSSPyzT@ac-duaqchc-shard-00-00.cmsgoyg.mongodb.net:27017,ac-duaqchc-shard-00-01.cmsgoyg.mongodb.net:27017,ac-duaqchc-shard-00-02.cmsgoyg.mongodb.net:27017/eldjamila_db?replicaSet=atlas-an8c5f-shard-0&authSource=admin&retryWrites=true&w=majority&ssl=false&tls=false';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'eldjamila-secret-2024';
 
 async function connectDB() {
     if (db) {
-        console.log('✅ Using existing MongoDB connection');
         return db;
     }
     
@@ -42,16 +42,14 @@ async function connectDB() {
         const safeURI = MONGODB_URI.replace(/:[^:@]*@/, ':****@');
         console.log('🌐 Using URI:', safeURI);
         
-        // Connection WITHOUT SSL for Vercel compatibility
-        const client = new MongoClient(MONGODB_URI, {
+        client = new MongoClient(MONGODB_URI, {
             serverSelectionTimeoutMS: 10000,
             connectTimeoutMS: 10000,
             socketTimeoutMS: 30000,
             maxPoolSize: 5,
             minPoolSize: 1,
-            ssl: false,      // ⬅️ IMPORTANT: Disable SSL
-            tls: false,      // ⬅️ IMPORTANT: Disable TLS
-            directConnection: false,
+            ssl: false,
+            tls: false,
             retryWrites: true,
             w: 'majority'
         });
@@ -73,35 +71,55 @@ async function connectDB() {
     } catch (error) {
         console.error('❌ MongoDB connection failed:', error.message);
         console.error('🔧 Error code:', error.code);
-        
         throw error;
     }
 }
 
 async function initCollections(database) {
     try {
-        // Create users collection if not exists
         const collections = await database.listCollections().toArray();
         const collectionNames = collections.map(c => c.name);
         
         if (!collectionNames.includes('users')) {
             await database.createCollection('users');
-            console.log('📁 Created users collection');
-            
-            // Create unique index on email
             await database.collection('users').createIndex({ email: 1 }, { unique: true });
-            console.log('🔑 Created unique index on email');
         }
         
         if (!collectionNames.includes('offers')) {
             await database.createCollection('offers');
-            console.log('📁 Created offers collection');
+            await database.collection('offers').createIndex({ isActive: 1 });
+        }
+        
+        if (!collectionNames.includes('bookings')) {
+            await database.createCollection('bookings');
+        }
+        
+        if (!collectionNames.includes('transactions')) {
+            await database.createCollection('transactions');
         }
         
     } catch (err) {
         console.log('📁 Collections already exist');
     }
 }
+
+// ========== MIDDLEWARE ==========
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    
+    if (!token) {
+        return res.status(401).json({ success: false, message: 'Token required' });
+    }
+    
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) {
+            return res.status(403).json({ success: false, message: 'Invalid token' });
+        }
+        req.user = user;
+        next();
+    });
+};
 
 // ========== API ROUTES ==========
 
@@ -116,13 +134,11 @@ app.get('/api/health', async (req, res) => {
             message: '✅ El Djamila API is fully operational',
             database: {
                 status: 'connected',
-                name: database.databaseName,
-                ssl: 'disabled (Vercel compatibility)'
+                name: database.databaseName
             },
             server: {
                 nodeVersion: process.version,
-                timestamp: new Date().toISOString(),
-                environment: process.env.NODE_ENV || 'production'
+                timestamp: new Date().toISOString()
             }
         });
         
@@ -130,11 +146,7 @@ app.get('/api/health', async (req, res) => {
         res.json({
             success: false,
             message: '⚠️ API is running but database is disconnected',
-            database: {
-                status: 'disconnected',
-                error: error.message,
-                suggestion: 'Check MONGODB_URI in Vercel Environment Variables'
-            },
+            error: error.message,
             server: {
                 nodeVersion: process.version,
                 timestamp: new Date().toISOString()
@@ -143,46 +155,13 @@ app.get('/api/health', async (req, res) => {
     }
 });
 
-// 2. Database Test
-app.get('/api/test-db', async (req, res) => {
-    try {
-        const database = await connectDB();
-        
-        // Get collections
-        const collections = await database.listCollections().toArray();
-        
-        // Get users count
-        const usersCount = await database.collection('users').countDocuments();
-        
-        res.json({
-            success: true,
-            message: '🎉 MongoDB is working perfectly! (No SSL)',
-            database: {
-                name: database.databaseName,
-                collections: collections.map(c => c.name),
-                usersCount: usersCount,
-                connection: 'no-ssl'
-            }
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Database connection failed',
-            error: error.message,
-            solution: 'Use this URI in Vercel: mongodb://eldjamila-cluster:YueVW02QRkSSPyzT@ac-duaqchc-shard-00-00.cmsgoyg.mongodb.net:27017,ac-duaqchc-shard-00-01.cmsgoyg.mongodb.net:27017,ac-duaqchc-shard-00-02.cmsgoyg.mongodb.net:27017/eldjamila_db?replicaSet=atlas-an8c5f-shard-0&authSource=admin&retryWrites=true&w=majority&ssl=false&tls=false'
-        });
-    }
-});
-
-// 3. Register User (WILL WORK NOW)
+// 2. Register User
 app.post('/api/auth/register', async (req, res) => {
     console.log('📝 Registration request received');
     
     try {
         const { name, email, password } = req.body;
         
-        // Validation
         if (!name || !email || !password) {
             return res.status(400).json({
                 success: false,
@@ -191,9 +170,7 @@ app.post('/api/auth/register', async (req, res) => {
         }
         
         const database = await connectDB();
-        console.log('✅ Database connected for registration');
         
-        // Check if user exists
         const existingUser = await database.collection('users').findOne({ 
             email: email.toLowerCase().trim() 
         });
@@ -205,10 +182,8 @@ app.post('/api/auth/register', async (req, res) => {
             });
         }
         
-        // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
         
-        // Create user object
         const userData = {
             name: name.trim(),
             email: email.toLowerCase().trim(),
@@ -217,30 +192,24 @@ app.post('/api/auth/register', async (req, res) => {
             balance: 100,
             points: 50,
             createdAt: new Date(),
-            updatedAt: new Date(),
             isActive: true
         };
         
-        // Insert user
         const result = await database.collection('users').insertOne(userData);
-        console.log('✅ User inserted with ID:', result.insertedId);
         
-        // Generate JWT token
         const token = jwt.sign(
             {
-                id: result.insertedId.toString(),
+                userId: result.insertedId.toString(),
                 email: userData.email,
-                name: userData.name,
                 role: userData.role
             },
             JWT_SECRET,
             { expiresIn: '30d' }
         );
         
-        // Success response
         res.status(201).json({
             success: true,
-            message: '🎉 Registration successful! Welcome to El Djamila',
+            message: '🎉 Registration successful!',
             token: token,
             user: {
                 id: result.insertedId,
@@ -248,8 +217,7 @@ app.post('/api/auth/register', async (req, res) => {
                 email: userData.email,
                 role: userData.role,
                 balance: userData.balance,
-                points: userData.points,
-                createdAt: userData.createdAt
+                points: userData.points
             }
         });
         
@@ -258,13 +226,12 @@ app.post('/api/auth/register', async (req, res) => {
         
         res.status(500).json({
             success: false,
-            message: 'Registration failed. Please try again.',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            message: 'Registration failed. Please try again.'
         });
     }
 });
 
-// 4. Login User
+// 3. Login User
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -278,7 +245,6 @@ app.post('/api/auth/login', async (req, res) => {
         
         const database = await connectDB();
         
-        // Find user
         const user = await database.collection('users').findOne({
             email: email.toLowerCase().trim()
         });
@@ -290,7 +256,6 @@ app.post('/api/auth/login', async (req, res) => {
             });
         }
         
-        // Verify password
         const validPassword = await bcrypt.compare(password, user.passwordHash);
         if (!validPassword) {
             return res.status(401).json({
@@ -299,19 +264,16 @@ app.post('/api/auth/login', async (req, res) => {
             });
         }
         
-        // Generate token
         const token = jwt.sign(
             {
-                id: user._id.toString(),
+                userId: user._id.toString(),
                 email: user.email,
-                name: user.name,
                 role: user.role
             },
             JWT_SECRET,
             { expiresIn: '30d' }
         );
         
-        // Success response
         res.json({
             success: true,
             message: '✅ Login successful!',
@@ -322,8 +284,7 @@ app.post('/api/auth/login', async (req, res) => {
                 email: user.email,
                 role: user.role,
                 balance: user.balance || 0,
-                points: user.points || 0,
-                lastLogin: new Date()
+                points: user.points || 0
             }
         });
         
@@ -336,6 +297,36 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
+// 4. Verify Token
+app.get('/api/auth/verify', authenticateToken, async (req, res) => {
+    try {
+        const database = await connectDB();
+        const user = await database.collection('users').findOne(
+            { _id: new ObjectId(req.user.userId) },
+            { projection: { passwordHash: 0 } }
+        );
+        
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+        
+        res.json({
+            success: true,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                balance: user.balance || 0,
+                points: user.points || 0
+            }
+        });
+    } catch (error) {
+        console.error('Verify error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
 // 5. Get Offers
 app.get('/api/offers', async (req, res) => {
     try {
@@ -345,184 +336,208 @@ app.get('/api/offers', async (req, res) => {
             .sort({ createdAt: -1 })
             .toArray();
         
-        // If no offers, create sample ones
-        if (offers.length === 0) {
-            const sampleOffers = [
-                {
-                    title: "Women's Haircut",
-                    description: "Professional haircut with styling",
-                    price: 45,
-                    originalPrice: 60,
-                    duration: "1 hour",
-                    category: "Haircut",
-                    isActive: true,
-                    createdAt: new Date()
-                },
-                {
-                    title: "Hair Coloring",
-                    description: "Full hair coloring service",
-                    price: 85,
-                    originalPrice: 120,
-                    duration: "2 hours",
-                    category: "Coloring",
-                    isActive: true,
-                    createdAt: new Date()
-                },
-                {
-                    title: "Hair Treatment",
-                    description: "Deep conditioning treatment",
-                    price: 60,
-                    originalPrice: 80,
-                    duration: "1.5 hours",
-                    category: "Treatment",
-                    isActive: true,
-                    createdAt: new Date()
-                }
-            ];
-            
-            await database.collection('offers').insertMany(sampleOffers);
-            const newOffers = await database.collection('offers').find().toArray();
-            return res.json({ success: true, offers: newOffers });
-        }
-        
-        res.json({ success: true, offers: offers });
-        
+        res.json({ success: true, offers });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Failed to load offers'
-        });
+        console.error('Error loading offers:', error);
+        res.status(500).json({ success: false, message: 'Error loading offers' });
     }
 });
 
-// 6. Create Offer
-app.post('/api/offers', async (req, res) => {
+// 6. Create Offer (Admin)
+app.post('/api/offers', authenticateToken, async (req, res) => {
     try {
-        const { title, description, price } = req.body;
+        const database = await connectDB();
+        const user = await database.collection('users').findOne({ 
+            _id: new ObjectId(req.user.userId) 
+        });
         
-        if (!title || !price) {
-            return res.status(400).json({
-                success: false,
-                message: 'Title and price are required'
-            });
+        if (!user || user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Not authorized' });
         }
         
-        const database = await connectDB();
+        const { title, category, original_price, promo_price, description } = req.body;
+        
+        if (!title || !category || !original_price) {
+            return res.status(400).json({ success: false, message: 'Title, category and price required' });
+        }
         
         const newOffer = {
-            title: title.trim(),
+            title,
+            category,
+            original_price: parseFloat(original_price),
+            promo_price: promo_price ? parseFloat(promo_price) : null,
             description: description || '',
-            price: Number(price),
             isActive: true,
-            createdAt: new Date(),
-            updatedAt: new Date()
+            createdAt: new Date()
         };
         
         const result = await database.collection('offers').insertOne(newOffer);
+        newOffer._id = result.insertedId;
         
-        res.json({
-            success: true,
-            message: 'Offer created successfully',
-            offer: { ...newOffer, _id: result.insertedId }
-        });
+        res.json({ success: true, offer: newOffer });
         
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Failed to create offer'
-        });
+        console.error('Error adding offer:', error);
+        res.status(500).json({ success: false, message: 'Error adding offer' });
     }
 });
 
-// 7. Simple Test
-app.get('/api/test', (req, res) => {
-    res.json({
-        success: true,
-        message: '🚀 El Djamila API is working! (No SSL Mode)',
-        version: '3.0.0',
-        node: process.version,
-        timestamp: new Date().toISOString(),
-        note: 'Using MongoDB without SSL for Vercel compatibility'
-    });
+// 7. Charge Balance
+app.post('/api/payment/charge', authenticateToken, async (req, res) => {
+    try {
+        const { amount } = req.body;
+        
+        if (!amount || amount <= 0) {
+            return res.status(400).json({ success: false, message: 'Invalid amount' });
+        }
+        
+        const database = await connectDB();
+        const user = await database.collection('users').findOne({ 
+            _id: new ObjectId(req.user.userId) 
+        });
+        
+        const newBalance = (user.balance || 0) + parseFloat(amount);
+        const newPoints = (user.points || 0) + Math.floor(amount);
+        
+        await database.collection('users').updateOne(
+            { _id: new ObjectId(req.user.userId) },
+            { 
+                $set: { 
+                    balance: newBalance,
+                    points: newPoints 
+                } 
+            }
+        );
+        
+        res.json({
+            success: true,
+            newBalance,
+            newPoints,
+            message: 'Balance charged successfully'
+        });
+        
+    } catch (error) {
+        console.error('Charge error:', error);
+        res.status(500).json({ success: false, message: 'Charge error' });
+    }
 });
 
-// 8. Get Users (for testing)
-app.get('/api/users', async (req, res) => {
+// 8. Make Booking
+app.post('/api/bookings', authenticateToken, async (req, res) => {
+    try {
+        const { offerId } = req.body;
+        
+        if (!offerId) {
+            return res.status(400).json({ success: false, message: 'Offer ID required' });
+        }
+        
+        const database = await connectDB();
+        
+        const offer = await database.collection('offers').findOne({ 
+            _id: new ObjectId(offerId) 
+        });
+        
+        if (!offer) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        
+        const price = offer.promo_price || offer.original_price;
+        
+        const user = await database.collection('users').findOne({ 
+            _id: new ObjectId(req.user.userId) 
+        });
+        
+        if ((user.balance || 0) < price) {
+            return res.status(400).json({ success: false, message: 'Insufficient balance' });
+        }
+        
+        const newBalance = (user.balance || 0) - price;
+        await database.collection('users').updateOne(
+            { _id: new ObjectId(req.user.userId) },
+            { $set: { balance: newBalance } }
+        );
+        
+        await database.collection('bookings').insertOne({
+            userId: new ObjectId(req.user.userId),
+            offerId: new ObjectId(offerId),
+            bookingDate: new Date(),
+            status: 'confirmed',
+            totalPrice: price,
+            createdAt: new Date()
+        });
+        
+        res.json({
+            success: true,
+            newBalance,
+            message: 'Booking successful'
+        });
+        
+    } catch (error) {
+        console.error('Booking error:', error);
+        res.status(500).json({ success: false, message: 'Booking error' });
+    }
+});
+
+// 9. Update Profile
+app.put('/api/profile/update', authenticateToken, async (req, res) => {
+    try {
+        const { name, phone } = req.body;
+        
+        if (!name) {
+            return res.status(400).json({ success: false, message: 'Name required' });
+        }
+        
+        const database = await connectDB();
+        
+        await database.collection('users').updateOne(
+            { _id: new ObjectId(req.user.userId) },
+            { 
+                $set: { 
+                    name,
+                    phone: phone || null
+                } 
+            }
+        );
+        
+        res.json({ success: true, message: 'Profile updated' });
+    } catch (error) {
+        console.error('Update profile error:', error);
+        res.status(500).json({ success: false, message: 'Update error' });
+    }
+});
+
+// 10. Get Users (Admin only)
+app.get('/api/users', authenticateToken, async (req, res) => {
     try {
         const database = await connectDB();
+        const user = await database.collection('users').findOne({ 
+            _id: new ObjectId(req.user.userId) 
+        });
+        
+        if (!user || user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Not authorized' });
+        }
+        
         const users = await database.collection('users')
             .find({}, { projection: { passwordHash: 0 } })
             .sort({ createdAt: -1 })
             .toArray();
         
-        res.json({
-            success: true,
-            count: users.length,
-            users: users
-        });
-        
+        res.json({ success: true, users });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Failed to load users'
-        });
+        console.error('Get users error:', error);
+        res.status(500).json({ success: false, message: 'Error getting users' });
     }
 });
 
-// 9. Home Page
-app.get('/', (req, res) => {
-    res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>El Djamila Salon API</title>
-            <style>
-                body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
-                .card { background: #f8f9fa; padding: 20px; margin: 15px 0; border-radius: 10px; }
-                .success { color: #28a745; font-weight: bold; }
-                code { background: #333; color: white; padding: 2px 6px; border-radius: 4px; }
-                a { color: #007bff; text-decoration: none; }
-            </style>
-        </head>
-        <body>
-            <h1>✨ El Djamila Salon API</h1>
-            <p><strong>Status:</strong> <span class="success">● Online (No SSL Mode)</span></p>
-            <p><strong>Node.js:</strong> ${process.version}</p>
-            <p><strong>MongoDB:</strong> Connected without SSL (Vercel compatible)</p>
-            
-            <div class="card">
-                <h3>🔍 Health Check</h3>
-                <p>Check API status: <code><a href="/api/health" target="_blank">/api/health</a></code></p>
-            </div>
-            
-            <div class="card">
-                <h3>🧪 Database Test</h3>
-                <p>Test MongoDB connection: <code><a href="/api/test-db" target="_blank">/api/test-db</a></code></p>
-            </div>
-            
-            <div class="card">
-                <h3>👤 Register User</h3>
-                <p><code>POST /api/auth/register</code></p>
-                <p><strong>Body:</strong> { "name": "Test User", "email": "test@test.com", "password": "123456" }</p>
-            </div>
-            
-            <div class="card">
-                <h3>🔐 Login User</h3>
-                <p><code>POST /api/auth/login</code></p>
-                <p><strong>Body:</strong> { "email": "test@test.com", "password": "123456" }</p>
-            </div>
-            
-            <div class="card">
-                <h3>📋 Get Offers</h3>
-                <p><code>GET /api/offers</code></p>
-                <a href="/api/offers" target="_blank">View Offers</a>
-            </div>
-            
-            <hr>
-            <p><strong>Note:</strong> This API uses MongoDB without SSL for Vercel compatibility.</p>
-        </body>
-        </html>
-    `);
+// 11. Simple Test
+app.get('/api/test', (req, res) => {
+    res.json({
+        success: true,
+        message: '🚀 El Djamila API is working!',
+        version: '2.0.0',
+        timestamp: new Date().toISOString()
+    });
 });
 
 // ========== ERROR HANDLING ==========
@@ -540,6 +555,15 @@ app.use((err, req, res, next) => {
         message: 'Internal server error'
     });
 });
+
+// ========== START SERVER ==========
+const PORT = process.env.PORT || 3000;
+
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`🚀 Server started on http://localhost:${PORT}`);
+    });
+}
 
 // ========== EXPORT FOR VERCEL ==========
 module.exports = app;
