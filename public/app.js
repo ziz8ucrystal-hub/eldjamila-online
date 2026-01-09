@@ -1,11 +1,59 @@
-// Initialize variables
+// ========== GLOBAL VARIABLES ==========
 let userBalance = 0;
 let userPoints = 0;
 let currentLanguage = 'fr';
 let currentUser = null;
 let isAdmin = false;
 
-// Initialize UI when DOM is loaded
+// ========== API CONFIGURATION ==========
+const API_BASE_URL = window.location.origin; // Auto-detect Vercel URL
+
+// API call function
+async function apiCall(endpoint, method = 'GET', data = null, requiresAuth = true) {
+    const url = `${API_BASE_URL}/api/${endpoint}`;
+    
+    const headers = {
+        'Content-Type': 'application/json',
+    };
+    
+    // Add token if needed
+    const token = localStorage.getItem('token');
+    if (requiresAuth && token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    const options = {
+        method,
+        headers,
+    };
+    
+    if (data) {
+        options.body = JSON.stringify(data);
+    }
+    
+    try {
+        console.log(`📤 API Call: ${method} ${url}`);
+        const response = await fetch(url, options);
+        
+        if (response.status === 401) {
+            // Token expired
+            logout();
+            throw new Error('Session expired');
+        }
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('❌ API Error:', error);
+        throw error;
+    }
+}
+
+// ========== INITIALIZE APP ==========
 document.addEventListener('DOMContentLoaded', function() {
     // Get DOM Elements
     const balanceAmount = document.getElementById('balanceAmount');
@@ -63,8 +111,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize UI
     updateBalanceDisplay();
+    
+    // Check login status on load
+    checkLoginStatus();
+    
+    // Load initial data if logged in
+    if (currentUser) {
+        loadOffers();
+        updateAdminStats();
+    }
 
-    // Switch between auth pages
+    // ========== AUTH PAGES SWITCHING ==========
     goToRegister.addEventListener('click', (e) => {
         e.preventDefault();
         loginPage.classList.remove('active');
@@ -77,8 +134,8 @@ document.addEventListener('DOMContentLoaded', function() {
         loginPage.classList.add('active');
     });
 
-    // Login functionality
-    loginBtn.addEventListener('click', () => {
+    // ========== LOGIN FUNCTIONALITY - REAL API ==========
+    loginBtn.addEventListener('click', async () => {
         const email = document.getElementById('loginEmail').value.trim();
         const password = document.getElementById('loginPassword').value.trim();
         const isAdminLogin = document.getElementById('adminLogin').checked;
@@ -88,47 +145,51 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // For demo purposes - in real app, this would be server-side authentication
-        // Check if it's the special admin email
-        if (isAdminLogin && email === 'admin@eldjamila.com' && password === 'admin123') {
-            // Admin login
-            currentUser = {
-                name: 'El Djamila',
-                email: email,
-                initials: 'ED',
-                isAdmin: true
-            };
-            isAdmin = true;
-            userBalance = 1000; // Admin has more balance for demo
-            userPoints = 1000;
-        } else if (!isAdminLogin) {
-            // Regular user login
-            currentUser = {
-                name: email.split('@')[0],
-                email: email,
-                initials: email.charAt(0).toUpperCase(),
-                isAdmin: false
-            };
-            isAdmin = false;
-            userBalance = 150; // Regular user balance
-            userPoints = 150;
-        } else {
-            alert('Identifiants administrateur incorrects');
-            return;
+        loginBtn.disabled = true;
+        loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connexion...';
+
+        try {
+            const result = await apiCall('auth/login', 'POST', {
+                email,
+                password
+            }, false);
+
+            if (result.success) {
+                // Save token and user data
+                localStorage.setItem('token', result.token);
+                localStorage.setItem('user', JSON.stringify(result.user));
+                
+                currentUser = result.user;
+                isAdmin = result.user.role === 'admin';
+                userBalance = result.user.balance || 0;
+                userPoints = result.user.points || 0;
+                
+                console.log('✅ Login successful, role:', result.user.role);
+                
+                // Switch to main app
+                switchToMainApp();
+                
+                // Load offers
+                loadOffers();
+                
+                // Update admin stats if admin
+                if (isAdmin) {
+                    updateAdminStats();
+                }
+            } else {
+                alert(result.message || 'Échec de connexion');
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            alert('Erreur de connexion au serveur');
+        } finally {
+            loginBtn.disabled = false;
+            loginBtn.innerHTML = '<i class="fas fa-sign-in-alt btn-icon"></i> Se connecter';
         }
-
-        // Save to localStorage
-        localStorage.setItem('currentUser', JSON.stringify(currentUser));
-        localStorage.setItem('userBalance', userBalance);
-        localStorage.setItem('userPoints', userPoints);
-        localStorage.setItem('isAdmin', isAdmin);
-
-        // Switch to main app
-        switchToMainApp();
     });
 
-    // Register functionality
-    registerBtn.addEventListener('click', () => {
+    // ========== REGISTER FUNCTIONALITY - REAL API ==========
+    registerBtn.addEventListener('click', async () => {
         const name = document.getElementById('registerName').value.trim();
         const email = document.getElementById('registerEmail').value.trim();
         const password = document.getElementById('registerPassword').value.trim();
@@ -149,28 +210,46 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // For demo purposes
-        currentUser = {
-            name: name,
-            email: email,
-            initials: name.charAt(0).toUpperCase(),
-            isAdmin: false
-        };
-        isAdmin = false;
-        userBalance = 50; // New user gets 50€ bonus
-        userPoints = 50;
+        registerBtn.disabled = true;
+        registerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Inscription...';
 
-        // Save to localStorage
-        localStorage.setItem('currentUser', JSON.stringify(currentUser));
-        localStorage.setItem('userBalance', userBalance);
-        localStorage.setItem('userPoints', userPoints);
-        localStorage.setItem('isAdmin', isAdmin);
+        try {
+            const result = await apiCall('auth/register', 'POST', {
+                name,
+                email,
+                password
+            }, false);
 
-        // Switch to main app
-        switchToMainApp();
+            if (result.success) {
+                // Save token and user data
+                localStorage.setItem('token', result.token);
+                localStorage.setItem('user', JSON.stringify(result.user));
+                
+                currentUser = result.user;
+                isAdmin = result.user.role === 'admin';
+                userBalance = result.user.balance || 0;
+                userPoints = result.user.points || 0;
+                
+                console.log('✅ Registration successful, role:', result.user.role);
+                
+                // Switch to main app
+                switchToMainApp();
+                
+                // Load offers
+                loadOffers();
+            } else {
+                alert(result.message || 'Échec de l\'inscription');
+            }
+        } catch (error) {
+            console.error('Registration error:', error);
+            alert('Erreur d\'inscription au serveur');
+        } finally {
+            registerBtn.disabled = false;
+            registerBtn.innerHTML = '<i class="fas fa-user-plus btn-icon"></i> S\'inscrire';
+        }
     });
 
-    // Switch to main app after login
+    // ========== SWITCH TO MAIN APP ==========
     function switchToMainApp() {
         // Hide auth pages
         loginPage.classList.remove('active');
@@ -196,19 +275,52 @@ document.addEventListener('DOMContentLoaded', function() {
         switchPage('home');
     }
 
-    // Update user info
+    // ========== CHECK LOGIN STATUS ==========
+    async function checkLoginStatus() {
+        const token = localStorage.getItem('token');
+        const userStr = localStorage.getItem('user');
+        
+        if (!token || !userStr) {
+            console.log('No session found');
+            return false;
+        }
+        
+        try {
+            // Verify token with API
+            const result = await apiCall('auth/verify', 'GET', null, true);
+            
+            if (result.success) {
+                currentUser = result.user;
+                isAdmin = result.user.role === 'admin';
+                userBalance = result.user.balance || 0;
+                userPoints = result.user.points || 0;
+                
+                console.log('✅ Session restored, role:', result.user.role);
+                
+                switchToMainApp();
+                return true;
+            }
+        } catch (error) {
+            console.log('Session invalid, logging out');
+            logout();
+            return false;
+        }
+    }
+
+    // ========== UPDATE USER INFO ==========
     function updateUserInfo() {
         if (!currentUser) return;
 
-        // Update avatar
-        userAvatar.textContent = currentUser.initials;
-        profileAvatar.textContent = currentUser.initials;
+        // Update avatar with initials
+        const initials = currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U';
+        userAvatar.textContent = initials;
+        profileAvatar.textContent = initials;
 
         // Update profile info
-        profileName.textContent = currentUser.name;
-        profileEmail.textContent = currentUser.email;
-        profileNameInput.value = currentUser.name;
-        profileEmailInput.value = currentUser.email;
+        profileName.textContent = currentUser.name || 'Utilisateur';
+        profileEmail.textContent = currentUser.email || 'email@exemple.com';
+        profileNameInput.value = currentUser.name || '';
+        profileEmailInput.value = currentUser.email || '';
 
         // Update balance and points
         profileBalance.textContent = `€${userBalance}`;
@@ -217,35 +329,151 @@ document.addEventListener('DOMContentLoaded', function() {
         // Show admin badge if admin
         if (isAdmin) {
             adminBadgeContainer.innerHTML = '<span class="admin-badge">ADMINISTRATEUR</span>';
+            adminOnlyElements.forEach(el => {
+                el.style.display = 'flex';
+                el.classList.add('show');
+            });
+            if (fabBtn) fabBtn.style.display = 'flex';
         } else {
             adminBadgeContainer.innerHTML = '';
+            adminOnlyElements.forEach(el => {
+                el.style.display = 'none';
+                el.classList.remove('show');
+            });
+            if (fabBtn) fabBtn.style.display = 'none';
         }
 
         // Update balance display
         updateBalanceDisplay();
     }
 
-    // Check if user is already logged in
-    function checkLoginStatus() {
-        const savedUser = localStorage.getItem('currentUser');
-        const savedBalance = localStorage.getItem('userBalance');
-        const savedPoints = localStorage.getItem('userPoints');
-        const savedIsAdmin = localStorage.getItem('isAdmin');
-
-        if (savedUser) {
-            currentUser = JSON.parse(savedUser);
-            userBalance = parseFloat(savedBalance) || 0;
-            userPoints = parseInt(savedPoints) || 0;
-            isAdmin = savedIsAdmin === 'true';
-
-            switchToMainApp();
+    // ========== LOAD OFFERS FROM API ==========
+    async function loadOffers() {
+        try {
+            const result = await apiCall('offers', 'GET');
+            
+            if (result.success && result.offers) {
+                // Clear container
+                offersContainer.innerHTML = '';
+                
+                if (result.offers.length === 0) {
+                    offersContainer.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-cut"></i>
+                            <h3>Aucune prestation disponible</h3>
+                            <p>Ajoutez votre première prestation</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Add each offer
+                result.offers.forEach(offer => {
+                    const offerCard = document.createElement('div');
+                    offerCard.className = 'card hair-service-card';
+                    
+                    // Add promotion badge if exists
+                    let badgeHtml = '';
+                    if (offer.badge) {
+                        badgeHtml = `<div class="promotion-badge">${offer.badge}</div>`;
+                    }
+                    
+                    // Calculate price display
+                    let priceHtml = '';
+                    if (offer.promo_price) {
+                        const discountPercent = Math.round((1 - offer.promo_price / offer.original_price) * 100);
+                        priceHtml = `
+                            <div class="price-info">
+                                <div class="original-price">€${offer.original_price}</div>
+                                <div class="current-price">€${offer.promo_price}</div>
+                            </div>
+                            <div class="discount-percent">-${discountPercent}%</div>
+                        `;
+                    } else {
+                        priceHtml = `
+                            <div class="price-info">
+                                <div class="current-price">€${offer.original_price || offer.price}</div>
+                            </div>
+                        `;
+                    }
+                    
+                    offerCard.innerHTML = `
+                        ${badgeHtml}
+                        <div class="card-image">
+                            <img src="${offer.image_url || 'https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80'}" alt="${offer.title}">
+                        </div>
+                        <div class="card-content">
+                            <span class="service-type">${offer.type || 'Service'}</span>
+                            <h3 class="service-name">${offer.title}</h3>
+                            <p style="font-size: 12px; color: var(--gray); margin-bottom: 10px;">
+                                ${offer.description || 'Service professionnel'}
+                            </p>
+                            <div class="price-section">
+                                ${priceHtml}
+                                <button class="book-now-btn" onclick="bookOffer('${offer.id || offer._id}')">Réserver</button>
+                            </div>
+                        </div>
+                    `;
+                    
+                    offersContainer.appendChild(offerCard);
+                });
+            } else {
+                offersContainer.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-cut"></i>
+                        <h3>Aucune prestation disponible</h3>
+                        <p>Ajoutez votre première prestation</p>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading offers:', error);
+            offersContainer.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3>Erreur de chargement</h3>
+                    <p>Impossible de charger les prestations</p>
+                </div>
+            `;
         }
     }
 
-    // Call on page load
-    checkLoginStatus();
+    // ========== BOOK OFFER FUNCTION ==========
+    window.bookOffer = async function(offerId) {
+        if (!currentUser) {
+            alert('Veuillez vous connecter pour réserver');
+            switchPage('profile');
+            return;
+        }
 
-    // Page Navigation
+        try {
+            const result = await apiCall('offers/book', 'POST', {
+                offerId: offerId
+            });
+
+            if (result.success) {
+                // Update user balance
+                userBalance = result.userBalance || userBalance;
+                userPoints = result.userPoints || userPoints;
+                
+                // Update localStorage
+                if (result.user) {
+                    localStorage.setItem('user', JSON.stringify(result.user));
+                    currentUser = result.user;
+                }
+                
+                updateUserInfo();
+                alert('Réservation effectuée avec succès!');
+            } else {
+                alert(result.message || 'Échec de la réservation');
+            }
+        } catch (error) {
+            console.error('Booking error:', error);
+            alert('Erreur lors de la réservation');
+        }
+    };
+
+    // ========== PAGE NAVIGATION ==========
     function switchPage(pageId) {
         // Hide all pages
         pages.forEach(page => {
@@ -253,7 +481,10 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         // Show selected page
-        document.getElementById(pageId + 'Page').classList.add('active');
+        const pageElement = document.getElementById(pageId + 'Page');
+        if (pageElement) {
+            pageElement.classList.add('active');
+        }
 
         // Update navigation
         navItems.forEach(item => {
@@ -264,13 +495,20 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         // Close dropdown if open
-        userDropdown.classList.remove('active');
+        if (userDropdown) {
+            userDropdown.classList.remove('active');
+        }
+
+        // Load data for specific pages
+        if (pageId === 'home' && currentUser) {
+            loadOffers();
+        }
     }
 
     // Make switchPage globally accessible
     window.switchPage = switchPage;
 
-    // Navigation Click Handlers
+    // ========== NAVIGATION EVENT LISTENERS ==========
     navItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
@@ -280,30 +518,34 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // User avatar click - toggle dropdown
-    userAvatar.addEventListener('click', () => {
-        userDropdown.classList.toggle('active');
-    });
+    if (userAvatar) {
+        userAvatar.addEventListener('click', () => {
+            userDropdown.classList.toggle('active');
+        });
+    }
 
     // Close dropdown when clicking outside
     document.addEventListener('click', (e) => {
-        if (!userAvatar.contains(e.target) && !userDropdown.contains(e.target)) {
+        if (userAvatar && userDropdown && !userAvatar.contains(e.target) && !userDropdown.contains(e.target)) {
             userDropdown.classList.remove('active');
         }
     });
 
-    // Settings Menu Toggle
-    settingsBtn.addEventListener('click', () => {
-        settingsMenu.classList.toggle('active');
-    });
+    // ========== SETTINGS MENU ==========
+    if (settingsBtn) {
+        settingsBtn.addEventListener('click', () => {
+            settingsMenu.classList.toggle('active');
+        });
+    }
 
     // Close settings when clicking outside
     document.addEventListener('click', (e) => {
-        if (!settingsBtn.contains(e.target) && !settingsMenu.contains(e.target)) {
+        if (settingsBtn && settingsMenu && !settingsBtn.contains(e.target) && !settingsMenu.contains(e.target)) {
             settingsMenu.classList.remove('active');
         }
     });
 
-    // Language Switching
+    // ========== LANGUAGE SWITCHING ==========
     langBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const lang = btn.getAttribute('data-lang');
@@ -312,24 +554,27 @@ document.addEventListener('DOMContentLoaded', function() {
             langBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
 
-            // Change language (simplified for demo)
+            // Change language
             currentLanguage = lang;
             alert(`Language changed to: ${lang === 'fr' ? 'French' : lang === 'en' ? 'English' : 'Arabic'}`);
 
-            // In a real app, you would update all text content here
-            // For demo, we'll just close the settings menu
-            settingsMenu.classList.remove('active');
+            // Close settings menu
+            if (settingsMenu) {
+                settingsMenu.classList.remove('active');
+            }
         });
     });
 
-    // FAB Button - Quick Action for Offers Page
+    // ========== FAB BUTTON ==========
     if (fabBtn) {
         fabBtn.addEventListener('click', () => {
-            addOfferModal.classList.add('active');
+            if (addOfferModal) {
+                addOfferModal.classList.add('active');
+            }
         });
     }
 
-    // Tab Switching
+    // ========== TAB SWITCHING ==========
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const tabId = btn.getAttribute('data-tab');
@@ -349,114 +594,73 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Add Offer Modal
+    // ========== ADD OFFER MODAL ==========
     if (addOfferBtn) {
         addOfferBtn.addEventListener('click', () => {
             addOfferModal.classList.add('active');
         });
     }
 
-    cancelOfferBtn.addEventListener('click', () => {
-        addOfferModal.classList.remove('active');
-        clearOfferForm();
-    });
+    if (cancelOfferBtn) {
+        cancelOfferBtn.addEventListener('click', () => {
+            addOfferModal.classList.remove('active');
+            clearOfferForm();
+        });
+    }
 
-    saveOfferBtn.addEventListener('click', () => {
-        const name = document.getElementById('offerName').value.trim();
-        const type = document.getElementById('offerType').value;
-        const originalPrice = document.getElementById('originalPrice').value;
-        const promoPrice = document.getElementById('offerPrice').value.trim();
-        const description = document.getElementById('offerDescription').value.trim();
-        const image = document.getElementById('offerImage').value.trim();
-        const promoBadge = document.getElementById('promoBadge').value;
+    if (saveOfferBtn) {
+        saveOfferBtn.addEventListener('click', async () => {
+            const name = document.getElementById('offerName').value.trim();
+            const type = document.getElementById('offerType').value;
+            const originalPrice = document.getElementById('originalPrice').value;
+            const promoPrice = document.getElementById('offerPrice').value.trim();
+            const description = document.getElementById('offerDescription').value.trim();
+            const image = document.getElementById('offerImage').value.trim();
+            const promoBadge = document.getElementById('promoBadge').value;
 
-        if (!name || !type || !originalPrice) {
-            alert('Veuillez remplir tous les champs obligatoires');
-            return;
-        }
-
-        // Remove empty state if it exists
-        const emptyState = offersContainer.querySelector('.empty-state');
-        if (emptyState) {
-            offersContainer.removeChild(emptyState);
-        }
-
-        // Calculate discount percentage if promo price exists
-        let discountHtml = '';
-        let priceHtml = '';
-        let currentPrice = parseFloat(originalPrice);
-
-        if (promoPrice && parseFloat(promoPrice) > 0) {
-            currentPrice = parseFloat(promoPrice);
-            const discountPercent = Math.round((1 - parseFloat(promoPrice) / parseFloat(originalPrice)) * 100);
-            priceHtml = `
-                <div class="price-info">
-                    <div class="original-price">€${parseFloat(originalPrice).toFixed(2)}</div>
-                    <div class="current-price">€${currentPrice.toFixed(2)}</div>
-                </div>
-                <div class="discount-percent">-${discountPercent}%</div>
-            `;
-        } else {
-            priceHtml = `
-                <div class="price-info">
-                    <div class="current-price">€${currentPrice.toFixed(2)}</div>
-                </div>
-                <button class="book-now-btn">Réserver</button>
-            `;
-        }
-
-        // Create new offer card with NEW LAYOUT
-        const offerCard = document.createElement('div');
-        offerCard.className = 'card hair-service-card';
-
-        // Add promotion badge if selected
-        let badgeHtml = '';
-        if (promoBadge) {
-            if (promoBadge === 'TOP') {
-                badgeHtml = `<div class="salon-badge">${promoBadge}</div>`;
-            } else {
-                badgeHtml = `<div class="promotion-badge">${promoBadge}</div>`;
+            if (!name || !type || !originalPrice) {
+                alert('Veuillez remplir tous les champs obligatoires');
+                return;
             }
-        }
 
-        // Default image if none provided
-        const defaultImages = [
-            'https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80',
-            'https://images.unsplash.com/photo-1596703923338-48f1c07e4f2e?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80',
-            'https://images.unsplash.com/photo-1556228578-9c360e1d8d34?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80',
-            'https://images.unsplash.com/photo-1605497788044-5a32c7078486?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80'
-        ];
-        const randomImage = defaultImages[Math.floor(Math.random() * defaultImages.length)];
-        const imageUrl = image || randomImage;
+            saveOfferBtn.disabled = true;
+            saveOfferBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Ajout...';
 
-        offerCard.innerHTML = `
-            ${badgeHtml}
-            <div class="card-image">
-                <img src="${imageUrl}" alt="${name}">
-            </div>
-            <div class="card-content">
-                <span class="service-type">${type}</span>
-                <h3 class="service-name">${name}</h3>
-                <p class="card-subtitle" style="font-size: 12px; color: var(--gray); margin-bottom: 10px;">${description || 'Prestation professionnelle de haute qualité.'}</p>
-                <div class="price-section">
-                    ${priceHtml}
-                </div>
-            </div>
-        `;
+            try {
+                const result = await apiCall('offers/create', 'POST', {
+                    title: name,
+                    type: type,
+                    original_price: parseFloat(originalPrice),
+                    promo_price: promoPrice ? parseFloat(promoPrice) : null,
+                    description: description,
+                    image_url: image || null,
+                    badge: promoBadge || null
+                });
 
-        // Add to offers container at the beginning
-        offersContainer.prepend(offerCard);
-
-        // Update admin stats
-        updateAdminStats();
-
-        // Close modal and clear form
-        addOfferModal.classList.remove('active');
-        clearOfferForm();
-
-        // Show success message
-        alert('Prestation ajoutée avec succès!');
-    });
+                if (result.success) {
+                    // Reload offers
+                    loadOffers();
+                    
+                    // Update admin stats
+                    updateAdminStats();
+                    
+                    // Close modal and clear form
+                    addOfferModal.classList.remove('active');
+                    clearOfferForm();
+                    
+                    alert('Prestation ajoutée avec succès!');
+                } else {
+                    alert(result.message || 'Échec de l\'ajout');
+                }
+            } catch (error) {
+                console.error('Add offer error:', error);
+                alert('Erreur lors de l\'ajout');
+            } finally {
+                saveOfferBtn.disabled = false;
+                saveOfferBtn.innerHTML = 'Ajouter la prestation';
+            }
+        });
+    }
 
     function clearOfferForm() {
         document.getElementById('offerName').value = '';
@@ -468,64 +672,68 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('promoBadge').selectedIndex = 0;
     }
 
-    // Start Live Modal
+    // ========== START LIVE MODAL ==========
     if (startLiveBtn) {
         startLiveBtn.addEventListener('click', () => {
             startLiveModal.classList.add('active');
         });
     }
 
-    cancelLiveBtn.addEventListener('click', () => {
-        startLiveModal.classList.remove('active');
-        clearLiveForm();
-    });
+    if (cancelLiveBtn) {
+        cancelLiveBtn.addEventListener('click', () => {
+            startLiveModal.classList.remove('active');
+            clearLiveForm();
+        });
+    }
 
-    goLiveBtn.addEventListener('click', () => {
-        const title = document.getElementById('liveTitle').value.trim();
-        const description = document.getElementById('liveDescription').value.trim();
+    if (goLiveBtn) {
+        goLiveBtn.addEventListener('click', () => {
+            const title = document.getElementById('liveTitle').value.trim();
+            const description = document.getElementById('liveDescription').value.trim();
 
-        if (!title) {
-            alert('Veuillez saisir un titre pour votre séance');
-            return;
-        }
+            if (!title) {
+                alert('Veuillez saisir un titre pour votre séance');
+                return;
+            }
 
-        // Remove empty state if it exists
-        const emptyState = liveContainer.querySelector('.empty-state');
-        if (emptyState) {
-            liveContainer.removeChild(emptyState);
-        }
+            // Remove empty state if it exists
+            const emptyState = liveContainer.querySelector('.empty-state');
+            if (emptyState) {
+                liveContainer.removeChild(emptyState);
+            }
 
-        // Create new live card
-        const liveCard = document.createElement('div');
-        liveCard.className = 'card hair-service-card';
-        liveCard.innerHTML = `
-            <div class="card-header">
-                <div class="live-indicator">
-                    <span class="live-dot"></span>
-                    <span>EN DIRECT</span>
+            // Create new live card
+            const liveCard = document.createElement('div');
+            liveCard.className = 'card hair-service-card';
+            liveCard.innerHTML = `
+                <div class="card-header">
+                    <div class="live-indicator">
+                        <span class="live-dot"></span>
+                        <span>EN DIRECT</span>
+                    </div>
+                    <h3 class="card-title">${title}</h3>
+                    <p class="card-subtitle">${description || 'Séance de coiffure en direct'}</p>
                 </div>
-                <h3 class="card-title">${title}</h3>
-                <p class="card-subtitle">${description || 'Séance de coiffure en direct'}</p>
-            </div>
-            <div class="card-content">
-                <p>Rejoignez-nous maintenant pour regarder et interagir en temps réel!</p>
-                <button class="btn btn-primary btn-full mt-12">
-                    <i class="fas fa-play btn-icon"></i>
-                    Rejoindre la séance
-                </button>
-            </div>
-        `;
+                <div class="card-content">
+                    <p>Rejoignez-nous maintenant pour regarder et interagir en temps réel!</p>
+                    <button class="btn btn-primary btn-full mt-12">
+                        <i class="fas fa-play btn-icon"></i>
+                        Rejoindre la séance
+                    </button>
+                </div>
+            `;
 
-        // Add to live container at the beginning
-        liveContainer.prepend(liveCard);
+            // Add to live container at the beginning
+            liveContainer.prepend(liveCard);
 
-        // Close modal and clear form
-        startLiveModal.classList.remove('active');
-        clearLiveForm();
+            // Close modal and clear form
+            startLiveModal.classList.remove('active');
+            clearLiveForm();
 
-        // Show success message
-        alert('Séance en direct démarrée avec succès!');
-    });
+            // Show success message
+            alert('Séance en direct démarrée avec succès!');
+        });
+    }
 
     function clearLiveForm() {
         document.getElementById('liveTitle').value = '';
@@ -533,71 +741,75 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('liveSchedule').value = '';
     }
 
-    // Create Contest Modal
+    // ========== CREATE CONTEST MODAL ==========
     if (createContestBtn) {
         createContestBtn.addEventListener('click', () => {
             createContestModal.classList.add('active');
         });
     }
 
-    cancelContestBtn.addEventListener('click', () => {
-        createContestModal.classList.remove('active');
-        clearContestForm();
-    });
-
-    saveContestBtn.addEventListener('click', () => {
-        const name = document.getElementById('contestName').value.trim();
-        const description = document.getElementById('contestDescription').value.trim();
-        const endDate = document.getElementById('contestEndDate').value;
-        const prize = document.getElementById('contestPrize').value.trim();
-
-        if (!name || !endDate || !prize) {
-            alert('Veuillez remplir tous les champs obligatoires');
-            return;
-        }
-
-        // Remove empty state if it exists
-        const emptyState = contestsContainer.querySelector('.empty-state');
-        if (emptyState) {
-            contestsContainer.removeChild(emptyState);
-        }
-
-        // Format date
-        const formattedDate = new Date(endDate).toLocaleDateString('fr-FR', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
+    if (cancelContestBtn) {
+        cancelContestBtn.addEventListener('click', () => {
+            createContestModal.classList.remove('active');
+            clearContestForm();
         });
+    }
 
-        // Create new contest card
-        const contestCard = document.createElement('div');
-        contestCard.className = 'card hair-service-card';
-        contestCard.innerHTML = `
-            <div class="card-header">
-                <div class="promotion-badge">CONCOURS</div>
-                <h3 class="card-title">${name}</h3>
-                <p class="card-subtitle">Fin: ${formattedDate}</p>
-            </div>
-            <div class="card-content">
-                <p><strong>Prix:</strong> ${prize}</p>
-                <p>${description || 'Participez à notre concours passionnant!'}</p>
-                <button class="btn btn-primary btn-full mt-12">
-                    <i class="fas fa-sign-in-alt btn-icon"></i>
-                    Participer
-                </button>
-            </div>
-        `;
+    if (saveContestBtn) {
+        saveContestBtn.addEventListener('click', () => {
+            const name = document.getElementById('contestName').value.trim();
+            const description = document.getElementById('contestDescription').value.trim();
+            const endDate = document.getElementById('contestEndDate').value;
+            const prize = document.getElementById('contestPrize').value.trim();
 
-        // Add to contests container at the beginning
-        contestsContainer.prepend(contestCard);
+            if (!name || !endDate || !prize) {
+                alert('Veuillez remplir tous les champs obligatoires');
+                return;
+            }
 
-        // Close modal and clear form
-        createContestModal.classList.remove('active');
-        clearContestForm();
+            // Remove empty state if it exists
+            const emptyState = contestsContainer.querySelector('.empty-state');
+            if (emptyState) {
+                contestsContainer.removeChild(emptyState);
+            }
 
-        // Show success message
-        alert('Concours créé avec succès!');
-    });
+            // Format date
+            const formattedDate = new Date(endDate).toLocaleDateString('fr-FR', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+
+            // Create new contest card
+            const contestCard = document.createElement('div');
+            contestCard.className = 'card hair-service-card';
+            contestCard.innerHTML = `
+                <div class="card-header">
+                    <div class="promotion-badge">CONCOURS</div>
+                    <h3 class="card-title">${name}</h3>
+                    <p class="card-subtitle">Fin: ${formattedDate}</p>
+                </div>
+                <div class="card-content">
+                    <p><strong>Prix:</strong> ${prize}</p>
+                    <p>${description || 'Participez à notre concours passionnant!'}</p>
+                    <button class="btn btn-primary btn-full mt-12">
+                        <i class="fas fa-sign-in-alt btn-icon"></i>
+                        Participer
+                    </button>
+                </div>
+            `;
+
+            // Add to contests container at the beginning
+            contestsContainer.prepend(contestCard);
+
+            // Close modal and clear form
+            createContestModal.classList.remove('active');
+            clearContestForm();
+
+            // Show success message
+            alert('Concours créé avec succès!');
+        });
+    }
 
     function clearContestForm() {
         document.getElementById('contestName').value = '';
@@ -606,134 +818,175 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('contestPrize').value = '';
     }
 
-    // Payment System
-    chargeBtn.addEventListener('click', () => {
-        const amount = parseFloat(chargeAmount.value);
+    // ========== PAYMENT SYSTEM ==========
+    if (chargeBtn) {
+        chargeBtn.addEventListener('click', async () => {
+            const amount = parseFloat(chargeAmount.value);
 
-        if (!amount || amount <= 0) {
-            alert('Veuillez saisir un montant valide');
-            return;
-        }
+            if (!amount || amount <= 0) {
+                alert('Veuillez saisir un montant valide');
+                return;
+            }
 
-        // Update balance
-        userBalance += amount;
-        userPoints += Math.floor(amount);
+            try {
+                const result = await apiCall('user/charge', 'POST', {
+                    amount: amount
+                });
 
-        // Save to localStorage
-        localStorage.setItem('userBalance', userBalance);
-        localStorage.setItem('userPoints', userPoints);
+                if (result.success) {
+                    // Update local variables
+                    userBalance = result.balance;
+                    userPoints = result.points;
+                    
+                    // Update current user
+                    if (result.user) {
+                        currentUser = result.user;
+                        localStorage.setItem('user', JSON.stringify(currentUser));
+                    }
 
-        updateBalanceDisplay();
-        updateUserInfo();
+                    updateBalanceDisplay();
+                    updateUserInfo();
 
-        // Clear input
-        chargeAmount.value = '';
+                    // Clear input
+                    chargeAmount.value = '';
 
-        // Show success message
-        alert(`Rechargement de €${amount.toFixed(2)} effectué avec succès!`);
-    });
+                    alert(`Rechargement de €${amount.toFixed(2)} effectué avec succès!`);
+                } else {
+                    alert(result.message || 'Échec du rechargement');
+                }
+            } catch (error) {
+                console.error('Charge error:', error);
+                alert('Erreur lors du rechargement');
+            }
+        });
+    }
 
     function updateBalanceDisplay() {
-        balanceAmount.textContent = `€${userBalance.toFixed(2)}`;
+        if (balanceAmount) balanceAmount.textContent = `€${userBalance.toFixed(2)}`;
         if (userBalanceEl) userBalanceEl.textContent = userBalance.toFixed(2);
         if (userPointsEl) userPointsEl.textContent = userPoints;
     }
 
-    // Save Profile
-    saveProfileBtn.addEventListener('click', () => {
-        const newName = profileNameInput.value.trim();
+    // ========== SAVE PROFILE ==========
+    if (saveProfileBtn) {
+        saveProfileBtn.addEventListener('click', async () => {
+            const newName = profileNameInput.value.trim();
+            const newEmail = profileEmailInput.value.trim();
 
-        if (!newName) {
-            alert('Veuillez entrer votre nom');
-            return;
-        }
+            if (!newName) {
+                alert('Veuillez entrer votre nom');
+                return;
+            }
 
-        // Update current user
-        currentUser.name = newName;
-        currentUser.initials = newName.charAt(0).toUpperCase();
+            if (!newEmail) {
+                alert('Veuillez entrer votre email');
+                return;
+            }
 
-        // Save to localStorage
-        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+            try {
+                const result = await apiCall('user/update', 'PUT', {
+                    name: newName,
+                    email: newEmail
+                });
 
-        // Update UI
-        updateUserInfo();
+                if (result.success) {
+                    // Update current user
+                    currentUser = result.user;
+                    localStorage.setItem('user', JSON.stringify(currentUser));
 
-        alert('Profil mis à jour avec succès!');
-    });
+                    // Update UI
+                    updateUserInfo();
 
-    // Logout functionality
+                    alert('Profil mis à jour avec succès!');
+                } else {
+                    alert(result.message || 'Échec de la mise à jour');
+                }
+            } catch (error) {
+                console.error('Update profile error:', error);
+                alert('Erreur lors de la mise à jour du profil');
+            }
+        });
+    }
+
+    // ========== LOGOUT FUNCTIONALITY ==========
     function logout() {
         // Clear localStorage
-        localStorage.removeItem('currentUser');
-        localStorage.removeItem('userBalance');
-        localStorage.removeItem('userPoints');
-        localStorage.removeItem('isAdmin');
-
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        
         // Reset variables
         currentUser = null;
         isAdmin = false;
         userBalance = 0;
         userPoints = 0;
-
+        
         // Hide main app
         mainHeader.style.display = 'none';
         bottomNav.style.display = 'none';
-
+        
         // Hide admin elements
         adminOnlyElements.forEach(el => {
             el.style.display = 'none';
             el.classList.remove('show');
         });
         if (fabBtn) fabBtn.style.display = 'none';
-
+        
         // Show login page
         loginPage.classList.add('active');
         registerPage.classList.remove('active');
-
+        
         // Reset login form
         document.getElementById('loginEmail').value = '';
         document.getElementById('loginPassword').value = '';
         document.getElementById('adminLogin').checked = false;
     }
 
-    logoutBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        logout();
-    });
-
-    logoutSidebarBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        logout();
-    });
-
-    // Admin Stats
-    function updateAdminStats() {
-        if (!isAdmin) return;
-
-        // Count offers
-        const offers = offersContainer.querySelectorAll('.card.hair-service-card');
-        document.getElementById('totalOffers').textContent = offers.length;
-
-        // For demo, just show some numbers
-        document.getElementById('totalUsers').textContent = '15';
-        document.getElementById('totalRevenue').textContent = '€2,450';
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            logout();
+        });
     }
 
-    // Manage Users Button
+    if (logoutSidebarBtn) {
+        logoutSidebarBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            logout();
+        });
+    }
+
+    // ========== ADMIN STATS ==========
+    async function updateAdminStats() {
+        if (!isAdmin) return;
+
+        try {
+            const result = await apiCall('admin/stats', 'GET');
+            
+            if (result.success) {
+                document.getElementById('totalOffers').textContent = result.totalOffers || 0;
+                document.getElementById('totalUsers').textContent = result.totalUsers || 0;
+                document.getElementById('totalRevenue').textContent = `€${result.totalRevenue || 0}`;
+            }
+        } catch (error) {
+            console.error('Error loading admin stats:', error);
+        }
+    }
+
+    // ========== MANAGE USERS BUTTON ==========
     if (manageUsersBtn) {
         manageUsersBtn.addEventListener('click', () => {
             alert('Fonctionnalité de gestion des utilisateurs à venir!');
         });
     }
 
-    // View Stats Button
+    // ========== VIEW STATS BUTTON ==========
     if (viewStatsBtn) {
         viewStatsBtn.addEventListener('click', () => {
             alert('Statistiques détaillées à venir!');
         });
     }
 
-    // Close modals when clicking outside
+    // ========== MODAL CLOSE ON CLICK OUTSIDE ==========
     document.querySelectorAll('.modal').forEach(modal => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
@@ -741,9 +994,4 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
-
-    // Initialize admin stats if admin
-    if (isAdmin) {
-        updateAdminStats();
-    }
 });
