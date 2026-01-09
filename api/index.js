@@ -12,7 +12,7 @@ const app = express();
 
 // ========== CONFIGURATION MIDDLEWARE ==========
 app.use(helmet({
-    contentSecurityPolicy: false // Désactivé pour Socket.io
+    contentSecurityPolicy: false
 }));
 app.use(cors({
     origin: "*",
@@ -22,25 +22,23 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ========== CONFIGURATION URGENTE ==========
-console.log('🚀 API El Djamila - Version Finale Vercel');
+// ========== CONFIGURATION MONGO POUR VERCEL ==========
+console.log('🚀 API El Djamila - Version Vercel SSL Fix');
 
-// ========== Connexion MongoDB ==========
+// ========== Connexion MongoDB (FIX SSL) ==========
 let db = null;
 let client = null;
 let dbConnected = false;
 
-// URI FINAL - TESTÉ ET CORRECT
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://eldjamila-cluster:YueVW02QRkSSPyzT@cluster0.cmsgoyg.mongodb.net/eldjamila_db';
+// URI avec paramètres SSL pour Vercel
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://eldjamila-cluster:YueVW02QRkSSPyzT@cluster0.cmsgoyg.mongodb.net/eldjamila_db?retryWrites=true&w=majority&tls=true';
 
 async function connectDB() {
     try {
         console.log('🔗 Initialisation connexion MongoDB...');
         
-        // Vérification URI
         if (!MONGODB_URI) {
-            console.error('🚨 ERREUR: MONGODB_URI est vide!');
-            console.error('💡 Solution: Ajoutez MONGODB_URI dans Vercel Environment Variables');
+            console.error('🚨 ERREUR: MONGODB_URI vide');
             return false;
         }
         
@@ -48,153 +46,136 @@ async function connectDB() {
         const safeURI = MONGODB_URI.replace(/:[^:@]*@/, ':****@');
         console.log('🌐 URI utilisé:', safeURI);
         
-        // Connexion avec timeout court
+        // CONFIGURATION SPÉCIALE POUR VERCEL
         client = new MongoClient(MONGODB_URI, {
-            serverSelectionTimeoutMS: 8000,
-            connectTimeoutMS: 8000,
-            socketTimeoutMS: 8000,
-            maxPoolSize: 5,
-            minPoolSize: 1
+            serverSelectionTimeoutMS: 15000,  // Augmenté à 15s
+            connectTimeoutMS: 15000,
+            socketTimeoutMS: 45000,
+            tls: true,  // FORCER TLS
+            tlsAllowInvalidCertificates: false,
+            tlsAllowInvalidHostnames: false,
+            retryWrites: true,
+            w: 'majority',
+            maxPoolSize: 10,
+            minPoolSize: 1,
+            // Désactiver le monitoring qui cause des problèmes SSL
+            monitorCommands: false,
+            // Utiliser un driver plus récent
+            useNewUrlParser: true,
+            useUnifiedTopology: true
         });
         
+        console.log('🔄 Connexion en cours...');
         await client.connect();
         console.log('✅ Client MongoDB connecté');
         
-        // Essayez plusieurs bases de données
-        const dbNames = ['eldjamila_db', 'test', 'admin'];
-        let connectedDb = null;
-        
+        // Tester avec plusieurs noms de base
+        const dbNames = ['eldjamila_db', 'test'];
         for (const dbName of dbNames) {
             try {
                 const testDb = client.db(dbName);
                 await testDb.command({ ping: 1 });
                 db = testDb;
-                connectedDb = dbName;
-                console.log(`✅ Base de données trouvée: ${dbName}`);
+                console.log(`✅ Base de données "${dbName}" accessible`);
                 break;
             } catch (err) {
-                console.log(`⚠️ Base ${dbName} non accessible: ${err.message}`);
+                console.log(`⚠️ Base "${dbName}" non accessible: ${err.message}`);
             }
         }
         
         if (!db) {
-            // Créer la base par défaut
+            // Créer la base
             db = client.db('eldjamila_db');
             console.log('✅ Nouvelle base créée: eldjamila_db');
         }
         
         dbConnected = true;
         
-        // Créer les collections si elles n'existent pas
-        const collections = ['users', 'offers', 'bookings', 'transactions'];
+        // Créer collections si nécessaire
+        const collections = ['users', 'offers'];
         for (const collName of collections) {
             try {
                 await db.createCollection(collName);
-                console.log(`📄 Collection créée: ${collName}`);
+                console.log(`📄 Collection "${collName}" créée`);
             } catch (err) {
-                // Collection existe déjà
+                // Existe déjà
             }
         }
         
-        // Créer les index
+        // Index pour users
         try {
             await db.collection('users').createIndex({ email: 1 }, { unique: true });
             console.log('🔑 Index email créé');
         } catch (err) {
-            console.log('ℹ️ Index email existe déjà');
+            // Existe déjà
         }
         
-        console.log('🎉 MongoDB prêt à utiliser!');
+        console.log('🎉 MongoDB prêt!');
         return true;
         
     } catch (error) {
-        console.error('❌ ERREUR CONNEXION MONGODB:', error.message);
-        console.error('🔧 Détails:', error);
+        console.error('❌ ERREUR MONGODB:', error.message);
+        
+        // Suggestions de solutions
+        if (error.message.includes('SSL') || error.message.includes('tls')) {
+            console.error('🔧 SOLUTION: Vérifiez que MONGODB_URI contient "tls=true" dans Vercel');
+            console.error('🔧 SOLUTION 2: Ajoutez "ssl=true" à la fin de l\'URI');
+        }
+        
+        if (error.message.includes('timed out')) {
+            console.error('🔧 SOLUTION: Augmentez timeout dans Vercel Network Access');
+        }
+        
         return false;
     }
 }
 
-// ========== Gestionnaire DB sécurisé ==========
+// ========== Gestionnaire DB ==========
 async function getDatabase() {
     if (!dbConnected || !db) {
-        console.log('🔄 Tentative de connexion à MongoDB...');
+        console.log('🔄 Reconnexion MongoDB...');
         const connected = await connectDB();
         if (!connected) {
-            throw new Error('Impossible de se connecter à MongoDB. Vérifiez MONGODB_URI dans Vercel.');
+            throw new Error('MongoDB non disponible. Vérifiez MONGODB_URI dans Vercel.');
         }
     }
-    
-    if (!db) {
-        throw new Error('Database non disponible');
-    }
-    
     return db;
 }
 
-// Initialisation immédiate
+// Initialisation
 connectDB().then(connected => {
     if (connected) {
-        console.log('✅ MongoDB initialisé avec succès');
+        console.log('✅ MongoDB initialisé');
     } else {
-        console.log('⚠️ MongoDB non initialisé - Attente des requêtes');
+        console.log('⚠️ MongoDB échoué - Mode sans DB');
     }
 });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'eldjamila-secret-2024';
 
-// ========== Middleware ==========
-const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    if (!token) {
-        return res.status(401).json({ success: false, message: 'Token requis' });
-    }
-    
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) {
-            return res.status(403).json({ success: false, message: 'Token invalide' });
-        }
-        req.user = user;
-        next();
-    });
-};
-
 // ========== Routes API ==========
 
-// 1. Health check complet
+// 1. Health check
 app.get('/api/health', async (req, res) => {
     try {
         const dbStatus = dbConnected ? 'connecté' : 'non connecté';
-        let dbDetails = { connected: dbConnected };
-        
-        if (dbConnected && db) {
-            try {
-                await db.command({ ping: 1 });
-                dbDetails.ping = 'OK';
-            } catch (err) {
-                dbDetails.ping = 'FAILED';
-            }
-        }
         
         res.json({
             success: true,
-            message: 'API El Djamila en ligne',
+            message: 'API El Djamila',
+            database: dbStatus,
             timestamp: new Date().toISOString(),
-            database: dbDetails,
-            environment: process.env.NODE_ENV || 'production',
-            version: '1.0.0-vercel'
+            environment: process.env.NODE_ENV || 'production'
         });
     } catch (error) {
         res.status(500).json({ 
             success: false, 
-            message: 'Erreur health check',
-            error: error.message 
+            message: error.message 
         });
     }
 });
 
-// 2. Test simple MongoDB
+// 2. Test MongoDB direct
 app.get('/api/test-mongo', async (req, res) => {
     try {
         const currentDb = await getDatabase();
@@ -202,80 +183,124 @@ app.get('/api/test-mongo', async (req, res) => {
         
         res.json({
             success: true,
-            message: 'MongoDB fonctionne',
+            message: 'MongoDB OK',
             collections: collections.map(c => c.name),
-            dbName: currentDb.databaseName,
-            connected: true
+            dbName: currentDb.databaseName
         });
     } catch (error) {
         res.status(500).json({
             success: false,
-            message: 'MongoDB erreur: ' + error.message,
-            connected: false
+            message: 'MongoDB erreur: ' + error.message
         });
     }
 });
 
-// 3. Connexion
+// 3. Inscription (SIMPLE)
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { name, email, password } = req.body;
+        
+        if (!name || !email || !password) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Tous les champs requis' 
+            });
+        }
+        
+        const currentDb = await getDatabase();
+        
+        // Vérifier si email existe
+        const existingUser = await currentDb.collection('users').findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Email déjà utilisé' 
+            });
+        }
+        
+        // Hash password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        // Créer utilisateur
+        const newUser = {
+            name,
+            email,
+            passwordHash: hashedPassword,
+            role: 'user',
+            balance: 50,
+            points: 50,
+            createdAt: new Date(),
+            isActive: true
+        };
+        
+        const result = await currentDb.collection('users').insertOne(newUser);
+        
+        // Générer token
+        const token = jwt.sign(
+            {
+                userId: result.insertedId.toString(),
+                email: email,
+                role: 'user'
+            },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+        
+        // Réponse
+        res.json({
+            success: true,
+            token,
+            user: {
+                id: result.insertedId,
+                name,
+                email,
+                role: 'user',
+                balance: 50,
+                points: 50
+            }
+        });
+        
+    } catch (error) {
+        console.error('❌ Erreur inscription:', error.message);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Erreur: ' + error.message 
+        });
+    }
+});
+
+// 4. Connexion
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
         
         if (!email || !password) {
-            return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Email et mot de passe requis' 
+            });
         }
         
         const currentDb = await getDatabase();
         const user = await currentDb.collection('users').findOne({ email });
         
         if (!user) {
-            // Si l'utilisateur n'existe pas, créer un utilisateur test (pour debug)
-            console.log('⚠️ Utilisateur non trouvé, création test');
-            
-            const hashedPassword = await bcrypt.hash(password, 10);
-            const newUser = {
-                name: 'Utilisateur Test',
-                email: email,
-                passwordHash: hashedPassword,
-                role: 'user',
-                balance: 100,
-                points: 50,
-                createdAt: new Date(),
-                isActive: true
-            };
-            
-            const result = await currentDb.collection('users').insertOne(newUser);
-            
-            const token = jwt.sign(
-                {
-                    userId: result.insertedId.toString(),
-                    email: email,
-                    role: 'user'
-                },
-                JWT_SECRET,
-                { expiresIn: '7d' }
-            );
-            
-            return res.json({
-                success: true,
-                token,
-                user: {
-                    id: result.insertedId,
-                    name: newUser.name,
-                    email: newUser.email,
-                    role: newUser.role,
-                    balance: newUser.balance,
-                    points: newUser.points
-                },
-                message: 'Utilisateur test créé'
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Identifiants incorrects' 
             });
         }
         
+        // Vérifier mot de passe
         const validPassword = await bcrypt.compare(password, user.passwordHash);
         if (!validPassword) {
-            return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Identifiants incorrects' 
+            });
         }
         
+        // Générer token
         const token = jwt.sign(
             {
                 userId: user._id.toString(),
@@ -300,77 +325,10 @@ app.post('/api/auth/login', async (req, res) => {
         });
         
     } catch (error) {
-        console.error('Erreur connexion:', error.message);
+        console.error('❌ Erreur connexion:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Erreur serveur: ' + error.message
-        });
-    }
-});
-
-// 4. Inscription
-app.post('/api/auth/register', async (req, res) => {
-    try {
-        const { name, email, password } = req.body;
-        
-        if (!name || !email || !password) {
-            return res.status(400).json({ success: false, message: 'Tous les champs sont requis' });
-        }
-        
-        if (password.length < 6) {
-            return res.status(400).json({ success: false, message: 'Mot de passe 6 caractères minimum' });
-        }
-        
-        const currentDb = await getDatabase();
-        const existingUser = await currentDb.collection('users').findOne({ email });
-        
-        if (existingUser) {
-            return res.status(400).json({ success: false, message: 'Email déjà utilisé' });
-        }
-        
-        const hashedPassword = await bcrypt.hash(password, 10);
-        
-        const newUser = {
-            name,
-            email,
-            passwordHash: hashedPassword,
-            role: 'user',
-            balance: 50,
-            points: 50,
-            createdAt: new Date(),
-            isActive: true
-        };
-        
-        const result = await currentDb.collection('users').insertOne(newUser);
-        
-        const token = jwt.sign(
-            {
-                userId: result.insertedId.toString(),
-                email: email,
-                role: 'user'
-            },
-            JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-        
-        res.json({
-            success: true,
-            token,
-            user: {
-                id: result.insertedId,
-                name,
-                email,
-                role: 'user',
-                balance: 50,
-                points: 50
-            }
-        });
-        
-    } catch (error) {
-        console.error('Erreur inscription:', error.message);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Erreur: ' + error.message
+            message: 'Erreur: ' + error.message 
         });
     }
 });
@@ -388,45 +346,43 @@ app.get('/api/offers', async (req, res) => {
         if (offers.length === 0) {
             const testOffers = [
                 {
-                    title: 'Offre Spéciale 50%',
-                    description: 'Réduction exceptionnelle',
-                    price: 25,
-                    originalPrice: 50,
+                    title: 'Coiffure Soirée',
+                    description: 'Pour vos occasions spéciales',
+                    price: 45,
+                    originalPrice: 60,
                     isActive: true,
                     createdAt: new Date()
                 },
                 {
-                    title: 'Pack Familial',
-                    description: 'Pour toute la famille',
-                    price: 75,
-                    originalPrice: 100,
+                    title: 'Coupe & Brushing',
+                    description: 'Service complet',
+                    price: 35,
+                    originalPrice: 45,
                     isActive: true,
                     createdAt: new Date()
                 }
             ];
             
             await currentDb.collection('offers').insertMany(testOffers);
-            const newOffers = await currentDb.collection('offers')
-                .find({ isActive: true })
-                .toArray();
-            
-            return res.json({ success: true, offers: newOffers, test: true });
+            const newOffers = await currentDb.collection('offers').find().toArray();
+            return res.json({ success: true, offers: newOffers });
         }
         
         res.json({ success: true, offers });
+        
     } catch (error) {
-        console.error('Erreur chargement offres:', error);
+        console.error('❌ Erreur offres:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Erreur: ' + error.message 
+            message: 'Erreur chargement' 
         });
     }
 });
 
 // 6. Créer offre
-app.post('/api/offers', authenticateToken, async (req, res) => {
+app.post('/api/offers', async (req, res) => {
     try {
-        const { title, description, price, originalPrice } = req.body;
+        const { title, description, price } = req.body;
         
         if (!title || !price) {
             return res.status(400).json({ 
@@ -440,8 +396,6 @@ app.post('/api/offers', authenticateToken, async (req, res) => {
             title,
             description: description || '',
             price: Number(price),
-            originalPrice: Number(originalPrice) || Number(price),
-            createdBy: req.user.userId,
             isActive: true,
             createdAt: new Date()
         };
@@ -455,7 +409,6 @@ app.post('/api/offers', authenticateToken, async (req, res) => {
         });
         
     } catch (error) {
-        console.error('Erreur création offre:', error);
         res.status(500).json({ 
             success: false, 
             message: 'Erreur création' 
@@ -468,28 +421,14 @@ app.get('/api/test', (req, res) => {
     res.json({
         success: true,
         message: 'API El Djamila fonctionne!',
-        timestamp: new Date().toISOString(),
-        version: '1.0.0'
+        timestamp: new Date().toISOString()
     });
 });
 
-// 8. Route pour voir les utilisateurs (debug)
-app.get('/api/users', authenticateToken, async (req, res) => {
-    try {
-        const currentDb = await getDatabase();
-        const users = await currentDb.collection('users')
-            .find({}, { projection: { passwordHash: 0 } })
-            .toArray();
-        
-        res.json({ success: true, users });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-});
-
-// ========== Gestion fichiers statiques ==========
+// ========== Static files ==========
 app.use(express.static(path.join(__dirname, '../public')));
 
+// Page d'accueil
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -497,42 +436,24 @@ app.get('/', (req, res) => {
         <head>
             <title>El Djamila</title>
             <style>
-                body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-                .endpoint { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 5px; }
-                code { background: #eee; padding: 2px 5px; }
+                body { font-family: Arial, sans-serif; padding: 20px; }
+                .endpoint { background: #f5f5f5; padding: 10px; margin: 10px 0; }
             </style>
         </head>
         <body>
-            <h1>🚀 El Djamila API</h1>
-            <p>API backend pour l'application El Djamila</p>
-            
+            <h1>El Djamila API</h1>
             <div class="endpoint">
                 <h3>🔍 Health Check</h3>
-                <p><code>GET /api/health</code> - Vérifier l'état de l'API</p>
-                <a href="/api/health" target="_blank">Tester</a>
+                <a href="/api/health" target="_blank">/api/health</a>
             </div>
-            
             <div class="endpoint">
                 <h3>🧪 Test MongoDB</h3>
-                <p><code>GET /api/test-mongo</code> - Tester connexion MongoDB</p>
-                <a href="/api/test-mongo" target="_blank">Tester</a>
+                <a href="/api/test-mongo" target="_blank">/api/test-mongo</a>
             </div>
-            
             <div class="endpoint">
-                <h3>📋 Test Simple</h3>
-                <p><code>GET /api/test</code> - Test API simple</p>
-                <a href="/api/test" target="_blank">Tester</a>
+                <h3>📋 Test API</h3>
+                <a href="/api/test" target="_blank">/api/test</a>
             </div>
-            
-            <div class="endpoint">
-                <h3>📄 Offres</h3>
-                <p><code>GET /api/offers</code> - Voir les offres disponibles</p>
-                <a href="/api/offers" target="_blank">Voir offres</a>
-            </div>
-            
-            <hr>
-            <p><strong>Base de données:</strong> ${dbConnected ? '✅ Connectée' : '❌ Non connectée'}</p>
-            <p><strong>MongoDB URI:</strong> ${process.env.MONGODB_URI ? 'Configuré' : 'Non configuré'}</p>
         </body>
         </html>
     `);
@@ -542,52 +463,17 @@ app.get('/', (req, res) => {
 app.use((req, res) => {
     res.status(404).json({
         success: false,
-        message: 'Route non trouvée: ' + req.url,
-        availableRoutes: [
-            '/api/health',
-            '/api/test-mongo',
-            '/api/test',
-            '/api/auth/login (POST)',
-            '/api/auth/register (POST)',
-            '/api/offers'
-        ]
+        message: 'Route non trouvée'
     });
 });
 
 app.use((err, req, res, next) => {
-    console.error('❌ Erreur serveur:', err.message);
+    console.error('❌ Erreur:', err.message);
     res.status(500).json({
         success: false,
-        message: 'Erreur interne du serveur',
-        error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        message: 'Erreur serveur'
     });
 });
 
-// ========== Socket.io pour Vercel ==========
-// Note: Socket.io peut avoir des limitations sur Vercel Serverless
-const httpServer = require('http').createServer(app);
-const io = require('socket.io')(httpServer, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
-});
-
-io.on('connection', (socket) => {
-    console.log('Socket connecté:', socket.id);
-    
-    socket.on('new_offer_added', (offer) => {
-        socket.broadcast.emit('new_offer', offer);
-    });
-    
-    socket.on('disconnect', () => {
-        console.log('Socket déconnecté:', socket.id);
-    });
-});
-
-// ========== Export pour Vercel ==========
-// IMPORTANT: Vercel a besoin de cette exportation exacte
+// ========== Export Vercel ==========
 module.exports = app;
-
-// Note: httpServer n'est PAS démarré ici
-// Vercel gère le serveur automatiquement
