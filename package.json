@@ -1,12 +1,11 @@
 {
   "name": "eldjamila-online",
   "version": "1.0.0",
-  "description": "El Djamila - Salon de coiffure",
+  "description": "El Djamila Salon de Coiffure",
   "main": "api/index.js",
   "scripts": {
     "start": "node api/index.js",
-    "dev": "nodemon api/index.js",
-    "vercel-build": "npm install"
+    "dev": "nodemon api/index.js"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -17,17 +16,13 @@
     "helmet": "^7.0.0",
     "socket.io": "^4.7.2"
   },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
-  },
   "engines": {
     "node": "24.x"
   },
   "keywords": [
     "eldjamila",
     "salon",
-    "coiffure",
-    "reservation"
+    "coiffure"
   ],
   "author": "El Djamila",
   "license": "ISC"
