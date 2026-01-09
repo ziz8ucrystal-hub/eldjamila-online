@@ -21,9 +21,14 @@
     "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": "24.x"                         // ⬅️ غيّر إلى 24.x فقط!
+    "node": "24.x"
   },
-  "keywords": ["eldjamila", "salon", "coiffure", "reservation"],
+  "keywords": [
+    "eldjamila",
+    "salon",
+    "coiffure",
+    "reservation"
+  ],
   "author": "El Djamila",
   "license": "ISC"
 }
