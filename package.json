@@ -19,7 +19,12 @@
   "engines": {
     "node": "24.x"
   },
-  "keywords": ["eldjamila", "salon", "coiffure", "reservation"],
+  "keywords": [
+    "eldjamila",
+    "salon",
+    "coiffure",
+    "reservation"
+  ],
   "author": "El Djamila",
   "license": "ISC"
 }
