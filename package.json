@@ -1,7 +1,7 @@
 {
   "name": "eldjamila-salon",
   "version": "1.0.0",
-  "description": "Salon de coiffure El Djamila",
+  "description": "Salon de coiffure El Djamila - Application complète avec API",
   "main": "api/index.js",
   "scripts": {
     "start": "node api/index.js",
@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "mongoose": "^7.5.0",
+    "mongoose": "^8.0.3",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "cors": "^2.8.5",
@@ -20,6 +20,15 @@
     "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": "18.x"
-  }
+    "node": "24.x"
+  },
+  "keywords": [
+    "salon",
+    "coiffure",
+    "beauty",
+    "appointment",
+    "booking"
+  ],
+  "author": "El Djamila Salon",
+  "license": "MIT"
 }
