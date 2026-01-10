@@ -1,63 +1,86 @@
+// ============================================
+// EL DJAMILA SALON - REAL PRODUCTION APP
+// NO TEST DATA - EVERYTHING STARTS EMPTY
+// ============================================
+
 // ========== GLOBAL VARIABLES ==========
-let userBalance = 0;
-let userPoints = 0;
+let userBalance = 0; // صفر - سيرفع من السيرفر
+let userPoints = 0;  // صفر - سيرفع من السيرفر
 let currentLanguage = 'fr';
 let currentUser = null;
 let isAdmin = false;
-let allOffers = [];
-let liveSessions = [];
+let allOffers = []; // فارغ تماماً - سيتم ملؤه من السيرفر
+let liveSessions = []; // فارغ - من السيرفر
+let allUsers = []; // فارغ - للمسؤول فقط
 
 // ========== API CONFIG ==========
 const API_BASE_URL = window.location.origin;
 
-// ========== NOTIFICATION SYSTEM ==========
-function showNotification(message, type = 'info', duration = 5000) {
-    // Remove existing notifications
-    const existingNotif = document.querySelector('.notification');
-    if (existingNotif) existingNotif.remove();
-    
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-    
-    let icon = 'ℹ️';
-    if (type === 'success') icon = '✅';
-    if (type === 'error') icon = '❌';
-    if (type === 'warning') icon = '⚠️';
-    
-    notification.innerHTML = `
-        <span class="notif-icon">${icon}</span>
-        <span class="notif-message">${message}</span>
-        <button class="notif-close" onclick="this.parentElement.remove()">×</button>
-    `;
-    
-    document.body.appendChild(notification);
-    
-    // Auto remove
-    if (duration > 0) {
+// ========== REAL DYNAMIC ISLAND SYSTEM ==========
+class RealNotification {
+    constructor() {
+        this.container = document.createElement('div');
+        this.container.className = 'dynamic-island-container';
+        document.body.appendChild(this.container);
+    }
+
+    show(message, type = 'info', duration = 4000) {
+        const notification = document.createElement('div');
+        notification.className = `dynamic-island ${type}`;
+        notification.innerHTML = `
+            <div class="island-content">
+                <span class="island-icon">${this.getIcon(type)}</span>
+                <span class="island-text">${message}</span>
+            </div>
+        `;
+
+        this.container.appendChild(notification);
+
+        // Add animation
+        setTimeout(() => notification.classList.add('show'), 10);
+
+        // Auto remove
         setTimeout(() => {
-            if (notification.parentNode) {
-                notification.remove();
-            }
+            notification.classList.remove('show');
+            setTimeout(() => notification.remove(), 300);
         }, duration);
+
+        // Click to close
+        notification.onclick = () => {
+            notification.classList.remove('show');
+            setTimeout(() => notification.remove(), 300);
+        };
+    }
+
+    getIcon(type) {
+        const icons = {
+            success: '✓',
+            error: '✗',
+            warning: '⚠',
+            info: 'ⓘ'
+        };
+        return icons[type] || 'ⓘ';
     }
 }
 
-// ========== API CALL FUNCTION ==========
-async function apiCall(endpoint, method = 'GET', data = null, requiresAuth = true) {
-    const url = `${API_BASE_URL}/api/${endpoint}`;
+const notificationSystem = new RealNotification();
+
+// ========== REAL API CALL ==========
+async function realApiCall(endpoint, method = 'GET', data = null) {
+    const token = localStorage.getItem('token');
     
     const headers = {
         'Content-Type': 'application/json',
     };
     
-    const token = localStorage.getItem('token');
-    if (requiresAuth && token) {
+    if (token) {
         headers['Authorization'] = `Bearer ${token}`;
     }
     
     const options = {
         method,
         headers,
+        credentials: 'include'
     };
     
     if (data) {
@@ -65,683 +88,483 @@ async function apiCall(endpoint, method = 'GET', data = null, requiresAuth = tru
     }
     
     try {
-        console.log(`🌐 API: ${method} ${url}`);
-        const response = await fetch(url, options);
+        const response = await fetch(`${API_BASE_URL}/api/${endpoint}`, options);
         
         if (response.status === 401) {
-            showNotification('Session expirée, veuillez vous reconnecter', 'error');
+            notificationSystem.show('Session expirée - Veuillez vous reconnecter', 'error');
             logout();
-            throw new Error('Session expired');
+            throw new Error('Unauthorized');
         }
         
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP ${response.status}: ${errorText}`);
+            const error = await response.json();
+            throw new Error(error.message || 'API Error');
         }
         
         return await response.json();
     } catch (error) {
-        console.error('❌ API Error:', error);
-        showNotification(error.message || 'Erreur de connexion au serveur', 'error');
+        console.error('API Error:', error);
+        notificationSystem.show(`Erreur: ${error.message}`, 'error');
         throw error;
     }
 }
 
-// ========== AUTH FUNCTIONS ==========
-async function loginUser(email, password, isAdminLogin = false) {
+// ========== AUTH SYSTEM ==========
+async function realLogin(email, password) {
     try {
-        const result = await apiCall('auth/login', 'POST', {
-            email,
-            password
-        }, false);
-
-        if (result.success) {
-            localStorage.setItem('token', result.token);
-            localStorage.setItem('user', JSON.stringify(result.user));
-            
-            currentUser = result.user;
-            isAdmin = result.user.role === 'admin';
-            userBalance = result.user.balance || 0;
-            userPoints = result.user.points || 0;
-            
-            showNotification('Connexion réussie!', 'success');
-            switchToMainApp();
-            await loadOffers();
-            
-            if (isAdmin) {
-                await updateAdminStats();
-            }
-        } else {
-            showNotification(result.message || 'Échec de connexion', 'error');
-        }
-    } catch (error) {
-        console.error('Login error:', error);
-    }
-}
-
-async function registerUser(name, email, password) {
-    try {
-        const result = await apiCall('auth/register', 'POST', {
-            name,
-            email,
-            password
-        }, false);
-
-        if (result.success) {
-            localStorage.setItem('token', result.token);
-            localStorage.setItem('user', JSON.stringify(result.user));
-            
-            currentUser = result.user;
-            isAdmin = result.user.role === 'admin';
-            userBalance = result.user.balance || 0;
-            userPoints = result.user.points || 0;
-            
-            showNotification('Inscription réussie!', 'success');
-            switchToMainApp();
-            await loadOffers();
-        } else {
-            showNotification(result.message || 'Échec de l\'inscription', 'error');
-        }
-    } catch (error) {
-        console.error('Registration error:', error);
-    }
-}
-
-async function checkLoginStatus() {
-    const token = localStorage.getItem('token');
-    const userStr = localStorage.getItem('user');
-    
-    if (!token || !userStr) {
-        return false;
-    }
-    
-    try {
-        const result = await apiCall('auth/verify', 'GET', null, true);
+        const result = await realApiCall('auth/login', 'POST', { email, password });
         
-        if (result.success) {
+        if (result.token) {
+            localStorage.setItem('token', result.token);
+            localStorage.setItem('user', JSON.stringify(result.user));
+            
             currentUser = result.user;
             isAdmin = result.user.role === 'admin';
             userBalance = result.user.balance || 0;
             userPoints = result.user.points || 0;
             
-            switchToMainApp();
-            await loadOffers();
-            
-            if (isAdmin) {
-                await updateAdminStats();
-            }
+            notificationSystem.show('Connexion réussie', 'success');
+            loadRealData();
+            showMainApp();
             
             return true;
         }
     } catch (error) {
-        console.log('Session invalid');
-        logout();
-        return false;
+        console.error('Login failed:', error);
     }
+    return false;
 }
 
-// ========== MAIN APP FUNCTIONS ==========
-function switchToMainApp() {
-    // Hide auth pages
-    document.getElementById('loginPage').classList.remove('active');
-    document.getElementById('registerPage').classList.remove('active');
-    
-    // Show main app
-    document.getElementById('mainHeader').style.display = 'flex';
-    document.getElementById('bottomNav').style.display = 'flex';
-    
-    // Update user info
-    updateUserInfo();
-    
-    // Go to home page
-    switchPage('home');
+async function realRegister(name, email, password) {
+    try {
+        const result = await realApiCall('auth/register', 'POST', {
+            name, email, password, role: 'user'
+        });
+        
+        if (result.success) {
+            notificationSystem.show('Compte créé avec succès', 'success');
+            return true;
+        }
+    } catch (error) {
+        console.error('Registration failed:', error);
+    }
+    return false;
 }
 
-function updateUserInfo() {
+// ========== REAL DATA LOADING ==========
+async function loadRealData() {
     if (!currentUser) return;
-
-    // Update avatars
-    const initials = currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U';
-    document.getElementById('userAvatar').textContent = initials;
-    document.getElementById('profileAvatar').textContent = initials;
-
-    // Update profile info
-    document.getElementById('profileName').textContent = currentUser.name || 'Utilisateur';
-    document.getElementById('profileEmail').textContent = currentUser.email || 'email@exemple.com';
-    document.getElementById('profileNameInput').value = currentUser.name || '';
-    document.getElementById('profileEmailInput').value = currentUser.email || '';
-
-    // Update balance and points
-    document.getElementById('profileBalance').textContent = `€${userBalance}`;
-    document.getElementById('profilePoints').textContent = userPoints;
-
-    // Update admin badge
-    if (isAdmin) {
-        document.getElementById('adminBadgeContainer').innerHTML = '<span class="admin-badge">ADMINISTRATEUR</span>';
-        // Show admin elements
-        document.querySelectorAll('.admin-only').forEach(el => {
-            el.style.display = 'flex';
-        });
-        document.getElementById('fabBtn').style.display = 'flex';
-    } else {
-        document.getElementById('adminBadgeContainer').innerHTML = '';
-        // Hide admin elements
-        document.querySelectorAll('.admin-only').forEach(el => {
-            el.style.display = 'none';
-        });
-        document.getElementById('fabBtn').style.display = 'none';
-    }
-
-    // Update balance display
-    updateBalanceDisplay();
-}
-
-function updateBalanceDisplay() {
-    document.getElementById('balanceAmount').textContent = `€${userBalance.toFixed(2)}`;
-    document.getElementById('userBalance').textContent = userBalance.toFixed(2);
-    document.getElementById('userPoints').textContent = userPoints;
-}
-
-// ========== PAGE NAVIGATION ==========
-function switchPage(pageId) {
-    // Hide all pages
-    document.querySelectorAll('.page').forEach(page => {
-        page.classList.remove('active');
-    });
-
-    // Show selected page
-    document.getElementById(pageId + 'Page').classList.add('active');
-
-    // Update navigation
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.remove('active');
-        if (item.getAttribute('data-page') === pageId) {
-            item.classList.add('active');
-        }
-    });
-
-    // Close dropdown if open
-    document.getElementById('userDropdown').classList.remove('active');
-
-    // Load data for specific pages
-    switch (pageId) {
-        case 'home':
-            loadHomeOffers();
-            break;
-        case 'offers':
-            loadOffers();
-            break;
-        case 'live':
-            loadLiveSessions();
-            break;
-        case 'admin':
-            if (isAdmin) {
-                updateAdminStats();
-            }
-            break;
-    }
-}
-
-// ========== OFFERS FUNCTIONS ==========
-async function loadOffers() {
-    try {
-        const result = await apiCall('offers', 'GET');
-        
-        if (result.success && result.offers && result.offers.length > 0) {
-            allOffers = result.offers;
-            renderOffers(result.offers);
-        } else {
-            document.getElementById('offersContainer').innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-gift"></i>
-                    <h3>Aucune prestation disponible</h3>
-                    <p>${isAdmin ? 'Ajoutez votre première prestation' : 'Les prestations apparaîtront ici'}</p>
-                    ${isAdmin ? `
-                        <button class="btn btn-primary mt-12" onclick="document.getElementById('addOfferBtn').click()">
-                            <i class="fas fa-plus btn-icon"></i>
-                            Ajouter une prestation
-                        </button>
-                    ` : ''}
-                </div>
-            `;
-        }
-    } catch (error) {
-        console.error('Error loading offers:', error);
-        document.getElementById('offersContainer').innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-exclamation-triangle"></i>
-                <h3>Erreur de chargement</h3>
-                <p>Impossible de charger les prestations</p>
-            </div>
-        `;
-    }
-}
-
-async function loadHomeOffers() {
-    try {
-        const result = await apiCall('offers', 'GET');
-        
-        if (result.success && result.offers && result.offers.length > 0) {
-            allOffers = result.offers.slice(0, 4); // Show only 4 on home
-            renderHomeOffers(result.offers.slice(0, 4));
-        }
-    } catch (error) {
-        console.error('Error loading home offers:', error);
-    }
-}
-
-function renderOffers(offers) {
-    const container = document.getElementById('offersContainer');
-    container.innerHTML = '';
     
-    offers.forEach(offer => {
-        const offerCard = createOfferCard(offer);
-        container.appendChild(offerCard);
-    });
+    // Load offers
+    try {
+        const offersData = await realApiCall('offers');
+        allOffers = offersData.offers || [];
+        renderRealOffers();
+    } catch (error) {
+        allOffers = [];
+        renderRealOffers();
+    }
+    
+    // Load live sessions
+    try {
+        const liveData = await realApiCall('live/sessions');
+        liveSessions = liveData.sessions || [];
+        renderRealLiveSessions();
+    } catch (error) {
+        liveSessions = [];
+        renderRealLiveSessions();
+    }
+    
+    // Load users if admin
+    if (isAdmin) {
+        try {
+            const usersData = await realApiCall('admin/users');
+            allUsers = usersData.users || [];
+            updateRealAdminStats();
+        } catch (error) {
+            allUsers = [];
+        }
+    }
 }
 
-function renderHomeOffers(offers) {
-    const container = document.getElementById('homeOffersContainer');
+// ========== REAL OFFERS RENDERING ==========
+function renderRealOffers() {
+    const container = document.getElementById('offersContainer') || 
+                     document.getElementById('homeOffersContainer');
+    
     if (!container) return;
     
-    container.innerHTML = '';
+    if (allOffers.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-gift"></i>
+                <h3>Aucune offre disponible</h3>
+                <p>Les offres apparaîtront ici lorsqu'elles seront ajoutées</p>
+                ${isAdmin ? `
+                    <button class="btn btn-primary" onclick="showAddOfferModal()">
+                        Ajouter la première offre
+                    </button>
+                ` : ''}
+            </div>
+        `;
+        return;
+    }
     
-    offers.forEach(offer => {
-        const offerCard = createOfferCard(offer);
-        container.appendChild(offerCard);
-    });
+    container.innerHTML = allOffers.map(offer => `
+        <div class="real-offer-card" data-id="${offer._id || offer.id}">
+            <div class="offer-image">
+                <img src="${offer.image || '/api/placeholder/400/300'}" 
+                     alt="${offer.title}"
+                     onerror="this.src='/api/placeholder/400/300'">
+                ${offer.discount ? `
+                    <div class="discount-badge">-${offer.discount}%</div>
+                ` : ''}
+            </div>
+            <div class="offer-content">
+                <span class="offer-category">${offer.category || 'Service'}</span>
+                <h3 class="offer-title">${offer.title}</h3>
+                <p class="offer-desc">${offer.description || ''}</p>
+                
+                <div class="offer-footer">
+                    <div class="pricing">
+                        ${offer.oldPrice ? `
+                            <span class="old-price">€${offer.oldPrice}</span>
+                        ` : ''}
+                        <span class="current-price">€${offer.price}</span>
+                    </div>
+                    <button class="book-btn" onclick="bookRealOffer('${offer._id || offer.id}')">
+                        Réserver
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('');
 }
 
-function createOfferCard(offer) {
-    const offerCard = document.createElement('div');
-    offerCard.className = 'card hair-service-card';
+// ========== REAL LIVE SESSIONS ==========
+function renderRealLiveSessions() {
+    const container = document.getElementById('liveContainer');
+    if (!container) return;
     
-    // Add promotion badge if exists
-    let badgeHtml = '';
-    if (offer.badge) {
-        if (offer.badge === 'TOP') {
-            badgeHtml = `<div class="salon-badge">${offer.badge}</div>`;
-        } else {
-            badgeHtml = `<div class="promotion-badge">${offer.badge}</div>`;
-        }
-    }
-    
-    // Calculate price display
-    let priceHtml = '';
-    if (offer.promo_price) {
-        const discountPercent = Math.round((1 - offer.promo_price / offer.original_price) * 100);
-        priceHtml = `
-            <div class="price-info">
-                <div class="original-price">€${offer.original_price}</div>
-                <div class="current-price">€${offer.promo_price}</div>
-            </div>
-            <div class="discount-percent">-${discountPercent}%</div>
-        `;
-    } else {
-        priceHtml = `
-            <div class="price-info">
-                <div class="current-price">€${offer.original_price || offer.price}</div>
+    if (liveSessions.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-video"></i>
+                <h3>Aucune session en direct</h3>
+                <p>${isAdmin ? 'Vous pouvez démarrer la première session' : 'Revenez plus tard'}</p>
+                ${isAdmin ? `
+                    <button class="btn btn-primary" onclick="showStartLiveModal()">
+                        Démarrer une session
+                    </button>
+                ` : ''}
             </div>
         `;
+        return;
     }
     
-    const imageUrl = offer.image_url || 'https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80';
-    
-    offerCard.innerHTML = `
-        ${badgeHtml}
-        <div class="card-image">
-            <img src="${imageUrl}" alt="${offer.title}" 
-                 onerror="this.src='https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80'">
+    container.innerHTML = liveSessions.map(session => `
+        <div class="live-session-card ${session.status === 'live' ? 'is-live' : ''}">
+            <div class="live-header">
+                <div class="live-status">
+                    ${session.status === 'live' ? `
+                        <span class="live-indicator"></span>
+                        <span>EN DIRECT</span>
+                    ` : '<span>TERMINÉ</span>'}
+                </div>
+                <span class="viewers">👁 ${session.viewers || 0}</span>
+            </div>
+            
+            <div class="live-content">
+                <h3>${session.title}</h3>
+                <p>${session.description || ''}</p>
+                
+                <div class="live-meta">
+                    <span>${formatTime(session.duration || 0)}</span>
+                    <span>${formatDate(session.createdAt)}</span>
+                </div>
+                
+                ${session.status === 'live' ? `
+                    <button class="join-btn" onclick="joinRealLive('${session.id}')">
+                        Rejoindre
+                    </button>
+                ` : `
+                    <button class="replay-btn" onclick="watchReplay('${session.id}')">
+                        Voir le replay
+                    </button>
+                `}
+            </div>
         </div>
-        <div class="card-content">
-            <span class="service-type">${offer.type || 'Service'}</span>
-            <h3 class="service-name">${offer.title}</h3>
-            <p class="card-subtitle">${offer.description || 'Service professionnel de haute qualité'}</p>
-            <div class="price-section">
-                ${priceHtml}
-                <button class="book-now-btn" onclick="bookOffer('${offer.id || offer._id}')">
-                    Réserver
-                </button>
+    `).join('');
+    
+    updateRealLiveStats();
+}
+
+function updateRealLiveStats() {
+    const statsContainer = document.getElementById('liveStats');
+    if (!statsContainer) return;
+    
+    const totalSessions = liveSessions.length;
+    const activeSessions = liveSessions.filter(s => s.status === 'live').length;
+    const totalDuration = liveSessions.reduce((sum, s) => sum + (s.duration || 0), 0);
+    
+    statsContainer.innerHTML = `
+        <div class="stats-grid">
+            <div class="stat-item">
+                <div class="stat-number">${totalSessions}</div>
+                <div class="stat-label">Sessions totales</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">${activeSessions}</div>
+                <div class="stat-label">En direct</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">${Math.round(totalDuration / 60)}h</div>
+                <div class="stat-label">Durée totale</div>
             </div>
         </div>
     `;
-    
-    return offerCard;
 }
 
-async function createOffer() {
-    const name = document.getElementById('offerName').value.trim();
-    const type = document.getElementById('offerType').value;
-    const originalPrice = document.getElementById('originalPrice').value;
-    const promoPrice = document.getElementById('offerPrice').value.trim();
-    const description = document.getElementById('offerDescription').value.trim();
-    const image = document.getElementById('offerImage').value.trim();
-    const promoBadge = document.getElementById('promoBadge').value;
+// ========== REAL USER BALANCE CARD ==========
+function updateRealBalanceCard() {
+    const balanceCard = document.getElementById('balanceCard');
+    if (!balanceCard) return;
     
-    if (!name || !type || !originalPrice) {
-        showNotification('Veuillez remplir tous les champs obligatoires', 'error');
-        return;
-    }
-    
-    try {
-        const result = await apiCall('offers/create', 'POST', {
-            title: name,
-            type: type,
-            original_price: parseFloat(originalPrice),
-            promo_price: promoPrice ? parseFloat(promoPrice) : null,
-            description: description,
-            image_url: image || null,
-            badge: promoBadge || null
-        });
-        
-        if (result.success) {
-            showNotification('Prestation ajoutée avec succès!', 'success');
-            await loadOffers();
-            await updateAdminStats();
-            document.getElementById('addOfferModal').classList.remove('active');
-            clearOfferForm();
-        }
-    } catch (error) {
-        console.error('Create offer error:', error);
-    }
-}
-
-async function bookOffer(offerId) {
-    if (!currentUser) {
-        showNotification('Veuillez vous connecter pour réserver', 'warning');
-        switchPage('profile');
-        return;
-    }
-    
-    if (!confirm('Voulez-vous vraiment réserver cette prestation?')) {
-        return;
-    }
-    
-    try {
-        const result = await apiCall('offers/book', 'POST', {
-            offerId: offerId
-        });
-        
-        if (result.success) {
-            userBalance = result.userBalance || userBalance;
-            userPoints = result.userPoints || userPoints;
-            
-            if (result.user) {
-                currentUser = result.user;
-                localStorage.setItem('user', JSON.stringify(currentUser));
-            }
-            
-            updateUserInfo();
-            showNotification('Réservation effectuée avec succès!', 'success');
-        }
-    } catch (error) {
-        console.error('Booking error:', error);
-    }
-}
-
-function clearOfferForm() {
-    document.getElementById('offerName').value = '';
-    document.getElementById('offerType').selectedIndex = 0;
-    document.getElementById('originalPrice').value = '';
-    document.getElementById('offerPrice').value = '';
-    document.getElementById('offerDescription').value = '';
-    document.getElementById('offerImage').value = '';
-    document.getElementById('promoBadge').selectedIndex = 0;
-}
-
-// ========== LIVE SESSIONS ==========
-async function loadLiveSessions() {
-    try {
-        const result = await apiCall('live/sessions', 'GET');
-        
-        if (result.success && result.sessions && result.sessions.length > 0) {
-            liveSessions = result.sessions;
-            renderLiveSessions(result.sessions);
-        } else {
-            document.getElementById('liveContainer').innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-video"></i>
-                    <h3>Aucune séance en direct</h3>
-                    <p>${isAdmin ? 'Commencez votre première séance' : 'Aucune séance en ce moment'}</p>
-                    ${isAdmin ? `
-                        <button class="btn btn-primary mt-12" onclick="document.getElementById('startLiveBtn').click()">
-                            <i class="fas fa-broadcast-tower btn-icon"></i>
-                            Démarrer une séance
-                        </button>
-                    ` : ''}
+    // للمستخدم العادي: عرض الرصيد فقط بدون شحن
+    if (!isAdmin) {
+        balanceCard.innerHTML = `
+            <div class="balance-display-card">
+                <div class="balance-header">
+                    <h3>Mon Solde</h3>
+                    <i class="fas fa-wallet"></i>
                 </div>
-            `;
-        }
-        
-        // Load live stats if admin
-        if (isAdmin) {
-            await loadLiveStats();
-        }
-    } catch (error) {
-        console.error('Error loading live sessions:', error);
-    }
-}
-
-function renderLiveSessions(sessions) {
-    const container = document.getElementById('liveContainer');
-    container.innerHTML = '';
-    
-    sessions.forEach(session => {
-        const sessionCard = document.createElement('div');
-        sessionCard.className = 'card';
-        
-        const isActive = session.status === 'active';
-        const duration = session.duration ? `${Math.round(session.duration / 60)}h` : 'En cours';
-        
-        sessionCard.innerHTML = `
-            <div class="card-header">
-                ${isActive ? `
-                    <div class="live-indicator">
-                        <span class="live-dot"></span>
-                        <span>EN DIRECT</span>
-                    </div>
-                ` : ''}
-                <h3 class="card-title">${session.title}</h3>
-                <p class="card-subtitle">${session.description || 'Séance de coiffure'}</p>
-            </div>
-            <div class="card-content">
-                <div class="card-meta">
-                    <div class="meta-item">
-                        <i class="fas fa-user"></i>
-                        <span>${session.createdBy || 'Admin'}</span>
-                    </div>
-                    <div class="meta-item">
-                        <i class="fas fa-clock"></i>
-                        <span>${duration}</span>
-                    </div>
-                    <div class="meta-item">
-                        <i class="fas fa-eye"></i>
-                        <span>${session.viewers || 0} spectateurs</span>
-                    </div>
+                <div class="balance-amount">€${userBalance.toFixed(2)}</div>
+                <div class="balance-points">
+                    <i class="fas fa-star"></i>
+                    <span>${userPoints} points</span>
                 </div>
-                <button class="btn btn-primary btn-full mt-12" onclick="joinLiveSession('${session.id || session._id}')">
-                    <i class="fas fa-play btn-icon"></i>
-                    ${isActive ? 'Rejoindre la séance' : 'Voir le replay'}
-                </button>
+                <p class="balance-note">Contactez l'admin pour recharger</p>
             </div>
         `;
+    } else {
+        // للمسؤول: عرض رصيده + أدوات الشحن
+        balanceCard.innerHTML = `
+            <div class="admin-balance-card">
+                <div class="admin-section">
+                    <h3>Mon Solde</h3>
+                    <div class="admin-balance">€${userBalance.toFixed(2)}</div>
+                    <div class="admin-points">${userPoints} points</div>
+                </div>
+                
+                <div class="charge-section">
+                    <h4>Recharger un client</h4>
+                    <div class="charge-form">
+                        <input type="number" id="chargeAmount" class="charge-input" 
+                               placeholder="Montant (€)" min="1" step="0.01">
+                        <input type="email" id="clientEmail" class="charge-input" 
+                               placeholder="Email du client">
+                        <button class="charge-btn" onclick="chargeClientBalance()">
+                            <i class="fas fa-plus"></i> Recharger
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+// ========== REAL FUNCTIONS ==========
+async function addRealOffer(offerData) {
+    if (!isAdmin) {
+        notificationSystem.show('Accès refusé', 'error');
+        return;
+    }
+    
+    try {
+        const result = await realApiCall('offers/create', 'POST', offerData);
+        if (result.success) {
+            notificationSystem.show('Offre ajoutée', 'success');
+            loadRealData();
+        }
+    } catch (error) {
+        console.error('Add offer failed:', error);
+    }
+}
+
+async function bookRealOffer(offerId) {
+    if (!currentUser) {
+        notificationSystem.show('Connectez-vous pour réserver', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await realApiCall('offers/book', 'POST', { offerId });
+        if (result.success) {
+            userBalance = result.newBalance;
+            userPoints = result.newPoints;
+            updateRealBalanceCard();
+            notificationSystem.show('Réservation confirmée', 'success');
+        }
+    } catch (error) {
+        notificationSystem.show('Erreur de réservation', 'error');
+    }
+}
+
+async function startRealLive(title, description) {
+    if (!isAdmin) {
+        notificationSystem.show('Admin seulement', 'error');
+        return;
+    }
+    
+    try {
+        const result = await realApiCall('live/create', 'POST', { title, description });
+        if (result.session) {
+            notificationSystem.show('Session démarrée', 'success');
+            loadRealData();
+        }
+    } catch (error) {
+        console.error('Start live failed:', error);
+    }
+}
+
+async function chargeClientBalance() {
+    if (!isAdmin) return;
+    
+    const amount = parseFloat(document.getElementById('chargeAmount').value);
+    const clientEmail = document.getElementById('clientEmail').value.trim();
+    
+    if (!amount || amount <= 0 || !clientEmail) {
+        notificationSystem.show('Données invalides', 'error');
+        return;
+    }
+    
+    try {
+        const result = await realApiCall('admin/charge', 'POST', {
+            clientEmail,
+            amount
+        });
         
-        container.appendChild(sessionCard);
+        if (result.success) {
+            notificationSystem.show(`Solde rechargé pour ${clientEmail}`, 'success');
+            document.getElementById('chargeAmount').value = '';
+            document.getElementById('clientEmail').value = '';
+        }
+    } catch (error) {
+        console.error('Charge failed:', error);
+    }
+}
+
+// ========== REAL USER SEARCH ==========
+function initRealUserSearch() {
+    const searchInput = document.getElementById('userSearchInput');
+    const resultsContainer = document.getElementById('searchResults');
+    
+    if (!searchInput || !resultsContainer) return;
+    
+    searchInput.addEventListener('input', async (e) => {
+        const query = e.target.value.trim();
+        
+        if (query.length < 2) {
+            resultsContainer.innerHTML = '';
+            resultsContainer.style.display = 'none';
+            return;
+        }
+        
+        try {
+            const result = await realApiCall(`users/search?q=${encodeURIComponent(query)}`);
+            displayRealSearchResults(result.users || []);
+        } catch (error) {
+            resultsContainer.innerHTML = '<div class="search-error">Erreur de recherche</div>';
+        }
     });
 }
 
-async function loadLiveStats() {
-    try {
-        const result = await apiCall('live/stats', 'GET');
-        
-        if (result.success) {
-            const stats = result.stats;
-            
-            // Create stats container if doesn't exist
-            let statsContainer = document.querySelector('.live-stats');
-            if (!statsContainer) {
-                statsContainer = document.createElement('div');
-                statsContainer.className = 'live-stats';
-                const liveContainer = document.getElementById('liveContainer');
-                liveContainer.parentNode.insertBefore(statsContainer, liveContainer);
-            }
-            
-            statsContainer.innerHTML = `
-                <div class="stats-grid">
-                    <div class="stat-card-live">
-                        <div class="stat-icon"><i class="fas fa-video"></i></div>
-                        <div class="stat-number-live">${stats.totalSessions}</div>
-                        <div class="stat-label-live">Séances totales</div>
-                    </div>
-                    <div class="stat-card-live">
-                        <div class="stat-icon"><i class="fas fa-broadcast-tower"></i></div>
-                        <div class="stat-number-live">${stats.activeSessions}</div>
-                        <div class="stat-label-live">En direct</div>
-                    </div>
-                    <div class="stat-card-live">
-                        <div class="stat-icon"><i class="fas fa-clock"></i></div>
-                        <div class="stat-number-live">${stats.totalDuration}</div>
-                        <div class="stat-label-live">Heures totales</div>
-                    </div>
-                    <div class="stat-card-live">
-                        <div class="stat-icon"><i class="fas fa-chart-line"></i></div>
-                        <div class="stat-number-live">${stats.avgDuration}</div>
-                        <div class="stat-label-live">Moyenne (heures)</div>
-                    </div>
+function displayRealSearchResults(users) {
+    const container = document.getElementById('searchResults');
+    if (!container) return;
+    
+    if (users.length === 0) {
+        container.innerHTML = '<div class="no-results">Aucun utilisateur trouvé</div>';
+        container.style.display = 'block';
+        return;
+    }
+    
+    container.innerHTML = users.map(user => `
+        <div class="user-result" onclick="viewUserDetails('${user._id}')">
+            <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
+            <div class="user-info">
+                <strong>${user.name}</strong>
+                <small>${user.email}</small>
+                <div class="user-meta">
+                    <span>€${user.balance || 0}</span>
+                    <span>${user.points || 0} pts</span>
                 </div>
-            `;
-        }
-    } catch (error) {
-        console.error('Error loading live stats:', error);
-    }
+            </div>
+        </div>
+    `).join('');
+    
+    container.style.display = 'block';
 }
 
-async function createLiveSession() {
-    const title = document.getElementById('liveTitle').value.trim();
-    const description = document.getElementById('liveDescription').value.trim();
+// ========== REAL INITIALIZATION ==========
+async function initRealApp() {
+    // Check existing session
+    const token = localStorage.getItem('token');
+    const userStr = localStorage.getItem('user');
     
-    if (!title) {
-        showNotification('Veuillez saisir un titre pour votre séance', 'error');
-        return;
-    }
-    
-    try {
-        const result = await apiCall('live/create', 'POST', {
-            title,
-            description
-        });
-        
-        if (result.success) {
-            showNotification('Séance en direct démarrée!', 'success');
-            await loadLiveSessions();
-            document.getElementById('startLiveModal').classList.remove('active');
-            clearLiveForm();
-        }
-    } catch (error) {
-        console.error('Start live error:', error);
-    }
-}
-
-function joinLiveSession(sessionId) {
-    showNotification('Connexion à la séance en cours...', 'info');
-    // Here you would implement actual live streaming logic
-    setTimeout(() => {
-        showNotification('Vous êtes maintenant connecté à la séance en direct!', 'success');
-    }, 1000);
-}
-
-function clearLiveForm() {
-    document.getElementById('liveTitle').value = '';
-    document.getElementById('liveDescription').value = '';
-    document.getElementById('liveSchedule').value = '';
-}
-
-// ========== ADMIN FUNCTIONS ==========
-async function updateAdminStats() {
-    if (!isAdmin) return;
-    
-    try {
-        const result = await apiCall('admin/stats', 'GET');
-        
-        if (result.success) {
-            const stats = result.stats;
-            document.getElementById('totalOffers').textContent = stats.totalOffers || 0;
-            document.getElementById('totalUsers').textContent = stats.totalUsers || 1;
-            document.getElementById('totalRevenue').textContent = `€${stats.totalRevenue || 0}`;
-        }
-    } catch (error) {
-        console.error('Error loading admin stats:', error);
-    }
-}
-
-// ========== PROFILE FUNCTIONS ==========
-async function saveProfile() {
-    const newName = document.getElementById('profileNameInput').value.trim();
-    const newEmail = document.getElementById('profileEmailInput').value.trim();
-    const phone = document.getElementById('profilePhone')?.value.trim() || '';
-    
-    if (!newName) {
-        showNotification('Veuillez entrer votre nom', 'error');
-        return;
-    }
-    
-    try {
-        const result = await apiCall('user/update', 'PUT', {
-            name: newName,
-            email: newEmail,
-            phone: phone
-        });
-        
-        if (result.success) {
-            currentUser = result.user;
-            localStorage.setItem('user', JSON.stringify(currentUser));
-            updateUserInfo();
-            showNotification('Profil mis à jour avec succès!', 'success');
-        }
-    } catch (error) {
-        console.error('Update profile error:', error);
-    }
-}
-
-// ========== PAYMENT FUNCTIONS ==========
-async function chargeBalance() {
-    const amount = parseFloat(document.getElementById('chargeAmount').value);
-    
-    if (!amount || amount <= 0) {
-        showNotification('Veuillez saisir un montant valide', 'error');
-        return;
-    }
-    
-    if (!isAdmin) {
-        showNotification('Le rechargement est réservé aux administrateurs', 'warning');
-        switchPage('home');
-        return;
-    }
-    
-    try {
-        const result = await apiCall('user/charge', 'POST', {
-            amount: amount
-        });
-        
-        if (result.success) {
-            userBalance = result.balance;
-            userPoints = result.points;
-            
+    if (token && userStr) {
+        try {
+            const result = await realApiCall('auth/verify');
             if (result.user) {
                 currentUser = result.user;
-                localStorage.setItem('user', JSON.stringify(currentUser));
+                isAdmin = result.user.role === 'admin';
+                userBalance = result.user.balance || 0;
+                userPoints = result.user.points || 0;
+                
+                showMainApp();
+                loadRealData();
+                updateRealBalanceCard();
+                
+                if (isAdmin) {
+                    initRealUserSearch();
+                }
+                
+                notificationSystem.show('Session restaurée', 'info');
+                return;
             }
-            
-            updateUserInfo();
-            document.getElementById('chargeAmount').value = '';
-            showNotification(`Rechargement de €${amount.toFixed(2)} effectué!`, 'success');
+        } catch (error) {
+            console.log('Session invalid');
         }
-    } catch (error) {
-        console.error('Charge error:', error);
     }
+    
+    // Show login if no valid session
+    showLoginPage();
 }
 
-// ========== LOGOUT FUNCTION ==========
+// ========== REAL PAGE MANAGEMENT ==========
+function showLoginPage() {
+    document.getElementById('mainApp').style.display = 'none';
+    document.getElementById('loginPage').style.display = 'block';
+}
+
+function showMainApp() {
+    document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'block';
+}
+
+// ========== REAL HELPER FUNCTIONS ==========
+function formatTime(minutes) {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+}
+
+function formatDate(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('fr-FR');
+}
+
 function logout() {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -750,259 +573,22 @@ function logout() {
     isAdmin = false;
     userBalance = 0;
     userPoints = 0;
+    allOffers = [];
+    liveSessions = [];
+    allUsers = [];
     
-    document.getElementById('mainHeader').style.display = 'none';
-    document.getElementById('bottomNav').style.display = 'none';
-    
-    document.getElementById('loginEmail').value = '';
-    document.getElementById('loginPassword').value = '';
-    document.getElementById('adminLogin').checked = false;
-    
-    document.getElementById('loginPage').classList.add('active');
-    document.getElementById('registerPage').classList.remove('active');
-    
-    showNotification('Déconnexion réussie', 'success');
+    showLoginPage();
+    notificationSystem.show('Déconnecté', 'info');
 }
 
-// ========== EVENT LISTENERS SETUP ==========
-function setupEventListeners() {
-    console.log('🔧 Setting up event listeners...');
-    
-    // ========== AUTH EVENT LISTENERS ==========
-    
-    // Switch between auth pages
-    document.getElementById('goToRegister').addEventListener('click', (e) => {
-        e.preventDefault();
-        document.getElementById('loginPage').classList.remove('active');
-        document.getElementById('registerPage').classList.add('active');
-    });
-    
-    document.getElementById('goToLogin').addEventListener('click', (e) => {
-        e.preventDefault();
-        document.getElementById('registerPage').classList.remove('active');
-        document.getElementById('loginPage').classList.add('active');
-    });
-    
-    // Login button
-    document.getElementById('loginBtn').addEventListener('click', async () => {
-        const email = document.getElementById('loginEmail').value.trim();
-        const password = document.getElementById('loginPassword').value.trim();
-        const isAdminLogin = document.getElementById('adminLogin').checked;
-        
-        if (!email || !password) {
-            showNotification('Veuillez remplir tous les champs', 'error');
-            return;
-        }
-        
-        document.getElementById('loginBtn').disabled = true;
-        document.getElementById('loginBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connexion...';
-        
-        await loginUser(email, password, isAdminLogin);
-        
-        document.getElementById('loginBtn').disabled = false;
-        document.getElementById('loginBtn').innerHTML = '<i class="fas fa-sign-in-alt btn-icon"></i> Se connecter';
-    });
-    
-    // Register button
-    document.getElementById('registerBtn').addEventListener('click', async () => {
-        const name = document.getElementById('registerName').value.trim();
-        const email = document.getElementById('registerEmail').value.trim();
-        const password = document.getElementById('registerPassword').value.trim();
-        const confirmPassword = document.getElementById('registerConfirmPassword').value.trim();
-        
-        if (!name || !email || !password || !confirmPassword) {
-            showNotification('Veuillez remplir tous les champs', 'error');
-            return;
-        }
-        
-        if (password !== confirmPassword) {
-            showNotification('Les mots de passe ne correspondent pas', 'error');
-            return;
-        }
-        
-        if (password.length < 6) {
-            showNotification('Le mot de passe doit contenir au moins 6 caractères', 'error');
-            return;
-        }
-        
-        document.getElementById('registerBtn').disabled = true;
-        document.getElementById('registerBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Inscription...';
-        
-        await registerUser(name, email, password);
-        
-        document.getElementById('registerBtn').disabled = false;
-        document.getElementById('registerBtn').innerHTML = '<i class="fas fa-user-plus btn-icon"></i> S\'inscrire';
-    });
-    
-    // ========== NAVIGATION EVENT LISTENERS ==========
-    
-    // Bottom navigation
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-            e.preventDefault();
-            const pageId = item.getAttribute('data-page');
-            switchPage(pageId);
-        });
-    });
-    
-    // User avatar click
-    document.getElementById('userAvatar').addEventListener('click', () => {
-        document.getElementById('userDropdown').classList.toggle('active');
-    });
-    
-    // Close dropdown when clicking outside
-    document.addEventListener('click', (e) => {
-        const userAvatar = document.getElementById('userAvatar');
-        const userDropdown = document.getElementById('userDropdown');
-        
-        if (!userAvatar.contains(e.target) && !userDropdown.contains(e.target)) {
-            userDropdown.classList.remove('active');
-        }
-    });
-    
-    // Settings menu
-    document.getElementById('settingsBtn').addEventListener('click', () => {
-        document.getElementById('settingsMenu').classList.toggle('active');
-    });
-    
-    // Language switching
-    document.querySelectorAll('.lang-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const lang = btn.getAttribute('data-lang');
-            
-            document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            
-            currentLanguage = lang;
-            showNotification(`Langue changée en: ${lang === 'fr' ? 'Français' : lang === 'en' ? 'English' : 'العربية'}`, 'info');
-            
-            document.getElementById('settingsMenu').classList.remove('active');
-        });
-    });
-    
-    // FAB Button
-    document.getElementById('fabBtn').addEventListener('click', () => {
-        document.getElementById('addOfferModal').classList.add('active');
-    });
-    
-    // Tab switching
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tabId = btn.getAttribute('data-tab');
-            
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            
-            if (tabId === 'live') {
-                document.getElementById('liveContainer').classList.remove('hidden');
-                document.getElementById('contestsContainer').classList.add('hidden');
-            } else {
-                document.getElementById('liveContainer').classList.add('hidden');
-                document.getElementById('contestsContainer').classList.remove('hidden');
-            }
-        });
-    });
-    
-    // ========== MODAL EVENT LISTENERS ==========
-    
-    // Add Offer Modal
-    document.getElementById('addOfferBtn').addEventListener('click', () => {
-        document.getElementById('addOfferModal').classList.add('active');
-    });
-    
-    document.getElementById('cancelOfferBtn').addEventListener('click', () => {
-        document.getElementById('addOfferModal').classList.remove('active');
-        clearOfferForm();
-    });
-    
-    document.getElementById('saveOfferBtn').addEventListener('click', createOffer);
-    
-    // Start Live Modal
-    document.getElementById('startLiveBtn').addEventListener('click', () => {
-        document.getElementById('startLiveModal').classList.add('active');
-    });
-    
-    document.getElementById('cancelLiveBtn').addEventListener('click', () => {
-        document.getElementById('startLiveModal').classList.remove('active');
-        clearLiveForm();
-    });
-    
-    document.getElementById('goLiveBtn').addEventListener('click', createLiveSession);
-    
-    // Create Contest Modal
-    document.getElementById('createContestBtn').addEventListener('click', () => {
-        document.getElementById('createContestModal').classList.add('active');
-    });
-    
-    document.getElementById('cancelContestBtn').addEventListener('click', () => {
-        document.getElementById('createContestModal').classList.remove('active');
-        clearContestForm();
-    });
-    
-    // ========== OTHER EVENT LISTENERS ==========
-    
-    // Save Profile
-    document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
-    
-    // Charge Balance
-    document.getElementById('chargeBtn').addEventListener('click', chargeBalance);
-    
-    // Logout
-    document.getElementById('logoutBtn').addEventListener('click', (e) => {
-        e.preventDefault();
-        logout();
-    });
-    
-    document.getElementById('logoutSidebarBtn').addEventListener('click', (e) => {
-        e.preventDefault();
-        logout();
-    });
-    
-    // Manage Users Button
-    document.getElementById('manageUsersBtn').addEventListener('click', () => {
-        showNotification('Gestion des utilisateurs à venir bientôt!', 'info');
-    });
-    
-    // View Stats Button
-    document.getElementById('viewStatsBtn').addEventListener('click', () => {
-        showNotification('Statistiques détaillées à venir bientôt!', 'info');
-    });
-    
-    // Close modals when clicking outside
-    document.querySelectorAll('.modal').forEach(modal => {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.remove('active');
-            }
-        });
-    });
-    
-    console.log('✅ Event listeners setup completed');
-}
-
-// ========== HELPER FUNCTIONS ==========
-function clearContestForm() {
-    document.getElementById('contestName').value = '';
-    document.getElementById('contestDescription').value = '';
-    document.getElementById('contestEndDate').value = '';
-    document.getElementById('contestPrize').value = '';
-}
-
-// ========== GLOBAL FUNCTIONS ==========
-window.switchPage = switchPage;
-window.bookOffer = bookOffer;
+// ========== GLOBAL EXPORTS ==========
+window.realLogin = realLogin;
+window.realRegister = realRegister;
+window.addRealOffer = addRealOffer;
+window.bookRealOffer = bookRealOffer;
+window.startRealLive = startRealLive;
+window.chargeClientBalance = chargeClientBalance;
 window.logout = logout;
 
-// ========== INITIALIZE APP ==========
-// Check login status on page load
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 El Djamila App Starting...');
-    
-    // Setup event listeners
-    setupEventListeners();
-    
-    // Check if user is already logged in
-    checkLoginStatus();
-    
-    console.log('✅ App started successfully');
-});
+// ========== START REAL APP ==========
+document.addEventListener('DOMContentLoaded', initRealApp);
