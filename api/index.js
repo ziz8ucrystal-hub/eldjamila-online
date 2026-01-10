@@ -1,5 +1,4 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
@@ -14,71 +13,65 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// MongoDB Connection بدون إعدادات deprecated
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://username:password@cluster.mongodb.net/eldjamila?retryWrites=true&w=majority';
-
-async function connectDB() {
-    try {
-        await mongoose.connect(MONGODB_URI);
-        console.log('✅ MongoDB Connected Successfully');
-    } catch (error) {
-        console.error('❌ MongoDB Connection Error:', error.message);
-        // إرجاع رد وهمي للاختبار
-        console.log('⚠️ Using mock data for testing');
-    }
-}
-
-// ========== SIMPLE IN-MEMORY DATABASE FOR TESTING ==========
-// (يستخدم إذا فشل اتصال MongoDB)
-
-let users = [
-    {
-        id: '1',
-        name: 'El Djamila Admin',
-        email: 'admin@eldjamila.com',
-        password: '$2a$10$X1xX5J5X5X5X5X5X5X5X5e', // admin123
-        role: 'admin',
-        balance: 10000,
-        points: 10000,
-        phone: ''
-    },
-    {
-        id: '2',
-        name: 'Test User',
-        email: 'test@user.com',
-        password: '$2a$10$X1xX5J5X5X5X5X5X5X5X5f', // 123456
-        role: 'user',
-        balance: 500,
-        points: 500,
-        phone: ''
-    }
-];
-
-let offers = [
-    {
-        id: '1',
-        title: 'Coiffure de Mariée Élégante',
-        type: 'Coiffure de mariage',
-        description: 'Coiffure sophistiquée pour votre jour spécial avec essai préalable inclus.',
-        original_price: 220,
-        promo_price: 180,
-        badge: 'TOP',
-        image_url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80'
-    },
-    {
-        id: '2',
-        title: 'Balayage Premium',
-        type: 'Couleur',
-        description: 'Technique de coloration professionnelle avec produits haute qualité.',
-        original_price: 160,
-        promo_price: 135,
-        badge: 'PROMO',
-        image_url: 'https://images.unsplash.com/photo-1596703923338-48f1c07e4f2e?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80'
-    }
-];
-
+// ========== IN-MEMORY DATABASE ==========
+let users = [];
+let offers = [];
 let bookings = [];
 let liveSessions = [];
+
+// Initialize sample data
+function initializeSampleData() {
+    // Sample users
+    users = [
+        {
+            id: '1',
+            name: 'El Djamila Admin',
+            email: 'admin@eldjamila.com',
+            password: '$2a$10$X1xX5J5X5X5X5X5X5X5X5e', // admin123
+            role: 'admin',
+            balance: 10000,
+            points: 10000,
+            phone: ''
+        },
+        {
+            id: '2',
+            name: 'Test User',
+            email: 'test@user.com',
+            password: '$2a$10$X1xX5J5X5X5X5X5X5X5X5f', // 123456
+            role: 'user',
+            balance: 500,
+            points: 500,
+            phone: ''
+        }
+    ];
+
+    // Sample offers
+    offers = [
+        {
+            id: '1',
+            title: 'Coiffure de Mariée Élégante',
+            type: 'Coiffure de mariage',
+            description: 'Coiffure sophistiquée pour votre jour spécial avec essai préalable inclus.',
+            original_price: 220,
+            promo_price: 180,
+            badge: 'TOP',
+            image_url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80'
+        },
+        {
+            id: '2',
+            title: 'Balayage Premium',
+            type: 'Couleur',
+            description: 'Technique de coloration professionnelle avec produits haute qualité.',
+            original_price: 160,
+            promo_price: 135,
+            badge: 'PROMO',
+            image_url: 'https://images.unsplash.com/photo-1596703923338-48f1c07e4f2e?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80'
+        }
+    ];
+}
+
+// Initialize data
+initializeSampleData();
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'eldjamila-secret-key-2024';
@@ -91,7 +84,9 @@ app.get('/api/health', (req, res) => {
         success: true,
         message: 'El Djamila API is running',
         timestamp: new Date().toISOString(),
-        database: 'in-memory'
+        database: 'in-memory',
+        usersCount: users.length,
+        offersCount: offers.length
     });
 });
 
@@ -372,13 +367,17 @@ app.post('/api/offers/book', authMiddleware, (req, res) => {
         }
         
         // Update user balance and points
-        req.user.balance -= price;
-        req.user.points += Math.floor(price);
+        const updatedUser = {
+            ...req.user,
+            balance: req.user.balance - price,
+            points: req.user.points + Math.floor(price)
+        };
         
         // Update user in array
         const userIndex = users.findIndex(u => u.id === req.user.id);
         if (userIndex !== -1) {
-            users[userIndex] = req.user;
+            users[userIndex] = updatedUser;
+            req.user = updatedUser;
         }
         
         // Create booking
@@ -423,10 +422,40 @@ app.post('/api/offers/book', authMiddleware, (req, res) => {
 
 // ========== USER ROUTES ==========
 
+// Get user profile
+app.get('/api/user/profile', authMiddleware, (req, res) => {
+    try {
+        const bookingsCount = bookings.filter(b => b.userId === req.user.id).length;
+        
+        res.json({
+            success: true,
+            user: {
+                id: req.user.id,
+                name: req.user.name,
+                email: req.user.email,
+                role: req.user.role,
+                balance: req.user.balance,
+                points: req.user.points,
+                phone: req.user.phone,
+                bookingsCount: bookingsCount
+            }
+        });
+    } catch (error) {
+        console.error('Get profile error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors du chargement du profil'
+        });
+    }
+});
+
 // Update user profile
 app.put('/api/user/update', authMiddleware, (req, res) => {
     try {
         const { name, email, phone } = req.body;
+        
+        // Create updated user
+        const updatedUser = { ...req.user };
         
         // Check if email is taken by another user
         if (email && email !== req.user.email) {
@@ -441,22 +470,23 @@ app.put('/api/user/update', authMiddleware, (req, res) => {
                 });
             }
             
-            req.user.email = email.toLowerCase();
+            updatedUser.email = email.toLowerCase();
         }
         
-        if (name) req.user.name = name;
-        if (phone) req.user.phone = phone;
+        if (name) updatedUser.name = name;
+        if (phone) updatedUser.phone = phone;
         
         // Update user in array
         const userIndex = users.findIndex(u => u.id === req.user.id);
         if (userIndex !== -1) {
-            users[userIndex] = req.user;
+            users[userIndex] = updatedUser;
+            req.user = updatedUser;
         }
         
         res.json({
             success: true,
             message: 'Profil mis à jour avec succès',
-            user: req.user
+            user: updatedUser
         });
     } catch (error) {
         console.error('Update user error:', error);
@@ -479,14 +509,18 @@ app.post('/api/user/charge', authMiddleware, adminMiddleware, (req, res) => {
             });
         }
         
-        // Update user balance and points
-        req.user.balance += parseFloat(amount);
-        req.user.points += Math.floor(amount);
+        // Update user
+        const updatedUser = {
+            ...req.user,
+            balance: req.user.balance + parseFloat(amount),
+            points: req.user.points + Math.floor(amount)
+        };
         
         // Update user in array
         const userIndex = users.findIndex(u => u.id === req.user.id);
         if (userIndex !== -1) {
-            users[userIndex] = req.user;
+            users[userIndex] = updatedUser;
+            req.user = updatedUser;
         }
         
         res.json({
@@ -522,26 +556,35 @@ app.get('/api/live/sessions', (req, res) => {
             description: session.description,
             startTime: session.startTime,
             status: session.status,
-            viewers: session.viewers
+            viewers: session.viewers,
+            createdBy: session.createdBy
         }))
     });
 });
 
 // Get live statistics
 app.get('/api/live/stats', authMiddleware, (req, res) => {
-    const totalSessions = liveSessions.length;
-    const activeSessions = liveSessions.filter(s => s.status === 'active').length;
-    const totalDuration = liveSessions.reduce((sum, session) => sum + (session.duration || 0), 0);
-    
-    res.json({
-        success: true,
-        stats: {
-            totalSessions,
-            activeSessions,
-            totalDuration: Math.round(totalDuration / 60),
-            avgDuration: totalSessions > 0 ? Math.round((totalDuration / totalSessions) / 60) : 0
-        }
-    });
+    try {
+        const totalSessions = liveSessions.length;
+        const activeSessions = liveSessions.filter(s => s.status === 'active').length;
+        const totalDuration = liveSessions.reduce((sum, session) => sum + (session.duration || 0), 0);
+        
+        res.json({
+            success: true,
+            stats: {
+                totalSessions,
+                activeSessions,
+                totalDuration: Math.round(totalDuration / 60),
+                avgDuration: totalSessions > 0 ? Math.round((totalDuration / totalSessions) / 60) : 0
+            }
+        });
+    } catch (error) {
+        console.error('Get live stats error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors du chargement des statistiques'
+        });
+    }
 });
 
 // Create live session (Admin only)
@@ -586,18 +629,26 @@ app.post('/api/live/create', authMiddleware, adminMiddleware, (req, res) => {
 // ========== ADMIN STATS ==========
 
 app.get('/api/admin/stats', authMiddleware, adminMiddleware, (req, res) => {
-    const totalOffers = offers.length;
-    const totalUsers = users.length;
-    const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.amount || 0), 0);
-    
-    res.json({
-        success: true,
-        stats: {
-            totalOffers,
-            totalUsers,
-            totalRevenue: Math.round(totalRevenue * 100) / 100
-        }
-    });
+    try {
+        const totalOffers = offers.length;
+        const totalUsers = users.length;
+        const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.amount || 0), 0);
+        
+        res.json({
+            success: true,
+            stats: {
+                totalOffers,
+                totalUsers,
+                totalRevenue: Math.round(totalRevenue * 100) / 100
+            }
+        });
+    } catch (error) {
+        console.error('Get admin stats error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors du chargement des statistiques'
+        });
+    }
 });
 
 // ========== ERROR HANDLING ==========
@@ -619,27 +670,13 @@ app.use((err, req, res, next) => {
 // ========== START SERVER ==========
 const PORT = process.env.PORT || 3000;
 
-async function startServer() {
-    try {
-        await connectDB();
-        console.log('✅ Database initialized');
-    } catch (error) {
-        console.log('⚠️ Using in-memory database');
-    }
-    
-    app.listen(PORT, () => {
-        console.log(`🚀 Server running on port ${PORT}`);
-        console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
-        console.log('📝 Test accounts:');
-        console.log('   👑 Admin: admin@eldjamila.com / admin123');
-        console.log('   👤 User: test@user.com / 123456');
-    });
-}
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
+    console.log('📝 Test accounts:');
+    console.log('   👑 Admin: admin@eldjamila.com / admin123');
+    console.log('   👤 User: test@user.com / 123456');
+});
 
 // For Vercel
 module.exports = app;
-
-// For local development
-if (require.main === module) {
-    startServer();
-}
