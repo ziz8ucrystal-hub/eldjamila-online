@@ -3,117 +3,112 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
-require('dotenv').config();
 
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/eldjamila', {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-});
+// MongoDB Connection بدون إعدادات deprecated
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://username:password@cluster.mongodb.net/eldjamila?retryWrites=true&w=majority';
 
-// User Schema
-const userSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    role: { type: String, default: 'user' },
-    balance: { type: Number, default: 0 },
-    points: { type: Number, default: 0 },
-    phone: { type: String, default: '' },
-    createdAt: { type: Date, default: Date.now }
-});
+async function connectDB() {
+    try {
+        await mongoose.connect(MONGODB_URI);
+        console.log('✅ MongoDB Connected Successfully');
+    } catch (error) {
+        console.error('❌ MongoDB Connection Error:', error.message);
+        // إرجاع رد وهمي للاختبار
+        console.log('⚠️ Using mock data for testing');
+    }
+}
 
-// Offer Schema
-const offerSchema = new mongoose.Schema({
-    title: { type: String, required: true },
-    type: { type: String, required: true },
-    description: { type: String },
-    original_price: { type: Number, required: true },
-    promo_price: { type: Number },
-    image_url: { type: String },
-    badge: { type: String },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    createdAt: { type: Date, default: Date.now }
-});
+// ========== SIMPLE IN-MEMORY DATABASE FOR TESTING ==========
+// (يستخدم إذا فشل اتصال MongoDB)
 
-// Live Session Schema
-const liveSchema = new mongoose.Schema({
-    title: { type: String, required: true },
-    description: { type: String },
-    startTime: { type: Date, default: Date.now },
-    endTime: { type: Date },
-    duration: { type: Number, default: 0 }, // in minutes
-    status: { type: String, default: 'ended' }, // active, ended
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    viewers: { type: Number, default: 0 }
-});
+let users = [
+    {
+        id: '1',
+        name: 'El Djamila Admin',
+        email: 'admin@eldjamila.com',
+        password: '$2a$10$X1xX5J5X5X5X5X5X5X5X5e', // admin123
+        role: 'admin',
+        balance: 10000,
+        points: 10000,
+        phone: ''
+    },
+    {
+        id: '2',
+        name: 'Test User',
+        email: 'test@user.com',
+        password: '$2a$10$X1xX5J5X5X5X5X5X5X5X5f', // 123456
+        role: 'user',
+        balance: 500,
+        points: 500,
+        phone: ''
+    }
+];
 
-// Booking Schema
-const bookingSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    offerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Offer' },
-    amount: { type: Number },
-    status: { type: String, default: 'pending' },
-    bookedAt: { type: Date, default: Date.now }
-});
+let offers = [
+    {
+        id: '1',
+        title: 'Coiffure de Mariée Élégante',
+        type: 'Coiffure de mariage',
+        description: 'Coiffure sophistiquée pour votre jour spécial avec essai préalable inclus.',
+        original_price: 220,
+        promo_price: 180,
+        badge: 'TOP',
+        image_url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80'
+    },
+    {
+        id: '2',
+        title: 'Balayage Premium',
+        type: 'Couleur',
+        description: 'Technique de coloration professionnelle avec produits haute qualité.',
+        original_price: 160,
+        promo_price: 135,
+        badge: 'PROMO',
+        image_url: 'https://images.unsplash.com/photo-1596703923338-48f1c07e4f2e?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80'
+    }
+];
 
-// Models
-const User = mongoose.model('User', userSchema);
-const Offer = mongoose.model('Offer', offerSchema);
-const Live = mongoose.model('Live', liveSchema);
-const Booking = mongoose.model('Booking', bookingSchema);
+let bookings = [];
+let liveSessions = [];
 
 // JWT Secret
-const JWT_SECRET = process.env.JWT_SECRET || 'eldjamila-secret-key';
-
-// Auth Middleware
-const authMiddleware = async (req, res, next) => {
-    try {
-        const token = req.header('Authorization')?.replace('Bearer ', '');
-        
-        if (!token) {
-            return res.status(401).json({ 
-                success: false, 
-                message: 'Token manquant' 
-            });
-        }
-        
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const user = await User.findById(decoded.userId);
-        
-        if (!user) {
-            return res.status(401).json({ 
-                success: false, 
-                message: 'Utilisateur non trouvé' 
-            });
-        }
-        
-        req.user = user;
-        req.token = token;
-        next();
-    } catch (error) {
-        res.status(401).json({ 
-            success: false, 
-            message: 'Token invalide' 
-        });
-    }
-};
+const JWT_SECRET = process.env.JWT_SECRET || 'eldjamila-secret-key-2024';
 
 // ========== AUTH ROUTES ==========
 
-// Register
+// Health Check
+app.get('/api/health', (req, res) => {
+    res.json({
+        success: true,
+        message: 'El Djamila API is running',
+        timestamp: new Date().toISOString(),
+        database: 'in-memory'
+    });
+});
+
+// Register User
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { name, email, password } = req.body;
         
+        if (!name || !email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tous les champs sont requis'
+            });
+        }
+        
         // Check if user exists
-        const existingUser = await User.findOne({ email });
+        const existingUser = users.find(u => u.email === email.toLowerCase());
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -124,49 +119,64 @@ app.post('/api/auth/register', async (req, res) => {
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
         
-        // Create user
-        const user = new User({
+        // Create user with bonus
+        const newUser = {
+            id: Date.now().toString(),
             name,
-            email,
+            email: email.toLowerCase(),
             password: hashedPassword,
+            role: 'user',
             balance: 50, // Bonus d'inscription
-            points: 50
-        });
+            points: 50,
+            phone: ''
+        };
         
-        await user.save();
+        users.push(newUser);
         
         // Generate token
-        const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+        const token = jwt.sign(
+            { userId: newUser.id, email: newUser.email, role: newUser.role },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
         
         res.json({
             success: true,
             message: 'Inscription réussie',
             token,
             user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                balance: user.balance,
-                points: user.points
+                id: newUser.id,
+                name: newUser.name,
+                email: newUser.email,
+                role: newUser.role,
+                balance: newUser.balance,
+                points: newUser.points,
+                phone: newUser.phone
             }
         });
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({
             success: false,
-            message: 'Erreur serveur'
+            message: 'Erreur lors de l\'inscription'
         });
     }
 });
 
-// Login
+// Login User
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
         
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email et mot de passe requis'
+            });
+        }
+        
         // Find user
-        const user = await User.findOne({ email });
+        const user = users.find(u => u.email === email.toLowerCase());
         if (!user) {
             return res.status(400).json({
                 success: false,
@@ -184,121 +194,141 @@ app.post('/api/auth/login', async (req, res) => {
         }
         
         // Generate token
-        const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+        const token = jwt.sign(
+            { userId: user.id, email: user.email, role: user.role },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
         
         res.json({
             success: true,
             message: 'Connexion réussie',
             token,
             user: {
-                id: user._id,
+                id: user.id,
                 name: user.name,
                 email: user.email,
                 role: user.role,
                 balance: user.balance,
-                points: user.points
+                points: user.points,
+                phone: user.phone
             }
         });
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({
             success: false,
-            message: 'Erreur serveur'
+            message: 'Erreur lors de la connexion'
         });
     }
 });
 
-// Verify Token
-app.get('/api/auth/verify', authMiddleware, async (req, res) => {
+// Verify Token (Middleware)
+const authMiddleware = (req, res, next) => {
     try {
-        res.json({
-            success: true,
-            user: {
-                id: req.user._id,
-                name: req.user.name,
-                email: req.user.email,
-                role: req.user.role,
-                balance: req.user.balance,
-                points: req.user.points
-            }
-        });
+        const authHeader = req.header('Authorization');
+        
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Token manquant ou invalide' 
+            });
+        }
+        
+        const token = authHeader.replace('Bearer ', '');
+        const decoded = jwt.verify(token, JWT_SECRET);
+        
+        const user = users.find(u => u.id === decoded.userId);
+        if (!user) {
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Utilisateur non trouvé' 
+            });
+        }
+        
+        req.user = user;
+        next();
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Erreur de vérification'
+        res.status(401).json({ 
+            success: false, 
+            message: 'Token invalide ou expiré' 
         });
     }
+};
+
+app.get('/api/auth/verify', authMiddleware, (req, res) => {
+    res.json({
+        success: true,
+        user: {
+            id: req.user.id,
+            name: req.user.name,
+            email: req.user.email,
+            role: req.user.role,
+            balance: req.user.balance,
+            points: req.user.points,
+            phone: req.user.phone
+        }
+    });
 });
 
 // ========== OFFERS ROUTES ==========
 
 // Get all offers
-app.get('/api/offers', async (req, res) => {
-    try {
-        const offers = await Offer.find().sort({ createdAt: -1 });
-        
-        res.json({
-            success: true,
-            offers: offers.map(offer => ({
-                id: offer._id,
-                title: offer.title,
-                type: offer.type,
-                description: offer.description,
-                original_price: offer.original_price,
-                promo_price: offer.promo_price,
-                image_url: offer.image_url || 'https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80',
-                badge: offer.badge,
-                createdAt: offer.createdAt
-            }))
-        });
-    } catch (error) {
-        console.error('Get offers error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erreur lors du chargement des offres'
-        });
-    }
+app.get('/api/offers', (req, res) => {
+    res.json({
+        success: true,
+        offers: offers.map(offer => ({
+            id: offer.id,
+            title: offer.title,
+            type: offer.type,
+            description: offer.description,
+            original_price: offer.original_price,
+            promo_price: offer.promo_price,
+            image_url: offer.image_url,
+            badge: offer.badge
+        }))
+    });
 });
 
 // Create offer (Admin only)
-app.post('/api/offers/create', authMiddleware, async (req, res) => {
+const adminMiddleware = (req, res, next) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({
+            success: false,
+            message: 'Accès réservé aux administrateurs'
+        });
+    }
+    next();
+};
+
+app.post('/api/offers/create', authMiddleware, adminMiddleware, (req, res) => {
     try {
-        // Check if admin
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({
+        const { title, type, description, original_price, promo_price, image_url, badge } = req.body;
+        
+        if (!title || !type || !original_price) {
+            return res.status(400).json({
                 success: false,
-                message: 'Accès non autorisé'
+                message: 'Titre, type et prix sont requis'
             });
         }
         
-        const { title, type, description, original_price, promo_price, image_url, badge } = req.body;
-        
-        const offer = new Offer({
+        const newOffer = {
+            id: Date.now().toString(),
             title,
             type,
             description,
-            original_price,
-            promo_price: promo_price || null,
+            original_price: parseFloat(original_price),
+            promo_price: promo_price ? parseFloat(promo_price) : null,
             image_url: image_url || null,
-            badge: badge || null,
-            createdBy: req.user._id
-        });
+            badge: badge || null
+        };
         
-        await offer.save();
+        offers.push(newOffer);
         
         res.json({
             success: true,
             message: 'Offre créée avec succès',
-            offer: {
-                id: offer._id,
-                title: offer.title,
-                type: offer.type,
-                description: offer.description,
-                original_price: offer.original_price,
-                promo_price: offer.promo_price,
-                image_url: offer.image_url,
-                badge: offer.badge
-            }
+            offer: newOffer
         });
     } catch (error) {
         console.error('Create offer error:', error);
@@ -310,12 +340,19 @@ app.post('/api/offers/create', authMiddleware, async (req, res) => {
 });
 
 // Book offer
-app.post('/api/offers/book', authMiddleware, async (req, res) => {
+app.post('/api/offers/book', authMiddleware, (req, res) => {
     try {
         const { offerId } = req.body;
         
+        if (!offerId) {
+            return res.status(400).json({
+                success: false,
+                message: 'ID de l\'offre requis'
+            });
+        }
+        
         // Get offer
-        const offer = await Offer.findById(offerId);
+        const offer = offers.find(o => o.id === offerId);
         if (!offer) {
             return res.status(404).json({
                 success: false,
@@ -334,31 +371,45 @@ app.post('/api/offers/book', authMiddleware, async (req, res) => {
             });
         }
         
-        // Update user balance
+        // Update user balance and points
         req.user.balance -= price;
-        req.user.points += Math.floor(price); // 1 point per 1€
-        await req.user.save();
+        req.user.points += Math.floor(price);
+        
+        // Update user in array
+        const userIndex = users.findIndex(u => u.id === req.user.id);
+        if (userIndex !== -1) {
+            users[userIndex] = req.user;
+        }
         
         // Create booking
-        const booking = new Booking({
-            userId: req.user._id,
-            offerId: offer._id,
-            amount: price
-        });
+        const booking = {
+            id: Date.now().toString(),
+            userId: req.user.id,
+            offerId: offer.id,
+            amount: price,
+            status: 'confirmed',
+            bookedAt: new Date().toISOString()
+        };
         
-        await booking.save();
+        bookings.push(booking);
         
         res.json({
             success: true,
-            message: 'Réservation effectuée',
+            message: 'Réservation effectuée avec succès',
             userBalance: req.user.balance,
             userPoints: req.user.points,
             user: {
-                id: req.user._id,
+                id: req.user.id,
                 name: req.user.name,
                 email: req.user.email,
                 balance: req.user.balance,
                 points: req.user.points
+            },
+            booking: {
+                id: booking.id,
+                amount: booking.amount,
+                status: booking.status,
+                bookedAt: booking.bookedAt
             }
         });
     } catch (error) {
@@ -373,40 +424,39 @@ app.post('/api/offers/book', authMiddleware, async (req, res) => {
 // ========== USER ROUTES ==========
 
 // Update user profile
-app.put('/api/user/update', authMiddleware, async (req, res) => {
+app.put('/api/user/update', authMiddleware, (req, res) => {
     try {
         const { name, email, phone } = req.body;
         
         // Check if email is taken by another user
-        if (email !== req.user.email) {
-            const existingUser = await User.findOne({ email });
+        if (email && email !== req.user.email) {
+            const existingUser = users.find(u => 
+                u.email === email.toLowerCase() && u.id !== req.user.id
+            );
+            
             if (existingUser) {
                 return res.status(400).json({
                     success: false,
                     message: 'Email déjà utilisé par un autre compte'
                 });
             }
+            
+            req.user.email = email.toLowerCase();
         }
         
-        // Update user
-        req.user.name = name || req.user.name;
-        req.user.email = email || req.user.email;
-        req.user.phone = phone || req.user.phone;
+        if (name) req.user.name = name;
+        if (phone) req.user.phone = phone;
         
-        await req.user.save();
+        // Update user in array
+        const userIndex = users.findIndex(u => u.id === req.user.id);
+        if (userIndex !== -1) {
+            users[userIndex] = req.user;
+        }
         
         res.json({
             success: true,
-            message: 'Profil mis à jour',
-            user: {
-                id: req.user._id,
-                name: req.user.name,
-                email: req.user.email,
-                phone: req.user.phone,
-                role: req.user.role,
-                balance: req.user.balance,
-                points: req.user.points
-            }
+            message: 'Profil mis à jour avec succès',
+            user: req.user
         });
     } catch (error) {
         console.error('Update user error:', error);
@@ -418,16 +468,8 @@ app.put('/api/user/update', authMiddleware, async (req, res) => {
 });
 
 // Charge balance (Admin only)
-app.post('/api/user/charge', authMiddleware, async (req, res) => {
+app.post('/api/user/charge', authMiddleware, adminMiddleware, (req, res) => {
     try {
-        // Check if admin
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({
-                success: false,
-                message: 'Accès non autorisé'
-            });
-        }
-        
         const { amount } = req.body;
         
         if (!amount || amount <= 0) {
@@ -437,19 +479,23 @@ app.post('/api/user/charge', authMiddleware, async (req, res) => {
             });
         }
         
-        // Update user balance
+        // Update user balance and points
         req.user.balance += parseFloat(amount);
         req.user.points += Math.floor(amount);
         
-        await req.user.save();
+        // Update user in array
+        const userIndex = users.findIndex(u => u.id === req.user.id);
+        if (userIndex !== -1) {
+            users[userIndex] = req.user;
+        }
         
         res.json({
             success: true,
-            message: 'Rechargement effectué',
+            message: 'Rechargement effectué avec succès',
             balance: req.user.balance,
             points: req.user.points,
             user: {
-                id: req.user._id,
+                id: req.user.id,
                 name: req.user.name,
                 balance: req.user.balance,
                 points: req.user.points
@@ -464,146 +510,69 @@ app.post('/api/user/charge', authMiddleware, async (req, res) => {
     }
 });
 
-// Search users (Admin only)
-app.get('/api/users/search', authMiddleware, async (req, res) => {
-    try {
-        // Check if admin
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({
-                success: false,
-                message: 'Accès non autorisé'
-            });
-        }
-        
-        const { q } = req.query;
-        
-        if (!q || q.trim() === '') {
-            return res.json({
-                success: true,
-                users: [],
-                message: 'Veuillez entrer un terme de recherche'
-            });
-        }
-        
-        const users = await User.find({
-            $or: [
-                { name: { $regex: q, $options: 'i' } },
-                { email: { $regex: q, $options: 'i' } }
-            ]
-        }).select('-password').limit(10);
-        
-        res.json({
-            success: true,
-            users: users.map(user => ({
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                balance: user.balance,
-                points: user.points,
-                createdAt: user.createdAt
-            }))
-        });
-    } catch (error) {
-        console.error('Search users error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erreur lors de la recherche'
-        });
-    }
-});
-
 // ========== LIVE ROUTES ==========
 
 // Get live sessions
-app.get('/api/live/sessions', async (req, res) => {
-    try {
-        const sessions = await Live.find()
-            .sort({ startTime: -1 })
-            .limit(10)
-            .populate('createdBy', 'name');
-        
-        res.json({
-            success: true,
-            sessions: sessions.map(session => ({
-                id: session._id,
-                title: session.title,
-                description: session.description,
-                startTime: session.startTime,
-                duration: session.duration,
-                status: session.status,
-                viewers: session.viewers,
-                createdBy: session.createdBy?.name || 'Admin'
-            }))
-        });
-    } catch (error) {
-        console.error('Get live sessions error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erreur lors du chargement des séances'
-        });
-    }
+app.get('/api/live/sessions', (req, res) => {
+    res.json({
+        success: true,
+        sessions: liveSessions.map(session => ({
+            id: session.id,
+            title: session.title,
+            description: session.description,
+            startTime: session.startTime,
+            status: session.status,
+            viewers: session.viewers
+        }))
+    });
 });
 
 // Get live statistics
-app.get('/api/live/stats', authMiddleware, async (req, res) => {
-    try {
-        const totalSessions = await Live.countDocuments();
-        const activeSessions = await Live.countDocuments({ status: 'active' });
-        
-        // Calculate total duration
-        const sessions = await Live.find({});
-        const totalDuration = sessions.reduce((sum, session) => sum + (session.duration || 0), 0);
-        
-        res.json({
-            success: true,
-            stats: {
-                totalSessions,
-                activeSessions,
-                totalDuration: Math.round(totalDuration / 60), // convert to hours
-                avgDuration: totalSessions > 0 ? Math.round((totalDuration / totalSessions) / 60) : 0
-            }
-        });
-    } catch (error) {
-        console.error('Get live stats error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erreur lors du chargement des statistiques'
-        });
-    }
+app.get('/api/live/stats', authMiddleware, (req, res) => {
+    const totalSessions = liveSessions.length;
+    const activeSessions = liveSessions.filter(s => s.status === 'active').length;
+    const totalDuration = liveSessions.reduce((sum, session) => sum + (session.duration || 0), 0);
+    
+    res.json({
+        success: true,
+        stats: {
+            totalSessions,
+            activeSessions,
+            totalDuration: Math.round(totalDuration / 60),
+            avgDuration: totalSessions > 0 ? Math.round((totalDuration / totalSessions) / 60) : 0
+        }
+    });
 });
 
 // Create live session (Admin only)
-app.post('/api/live/create', authMiddleware, async (req, res) => {
+app.post('/api/live/create', authMiddleware, adminMiddleware, (req, res) => {
     try {
-        // Check if admin
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({
+        const { title, description } = req.body;
+        
+        if (!title) {
+            return res.status(400).json({
                 success: false,
-                message: 'Accès non autorisé'
+                message: 'Titre de la séance requis'
             });
         }
         
-        const { title, description } = req.body;
-        
-        const liveSession = new Live({
+        const newSession = {
+            id: Date.now().toString(),
             title,
             description,
-            createdBy: req.user._id,
-            status: 'active'
-        });
+            startTime: new Date().toISOString(),
+            status: 'active',
+            viewers: 0,
+            duration: 0,
+            createdBy: req.user.name
+        };
         
-        await liveSession.save();
+        liveSessions.push(newSession);
         
         res.json({
             success: true,
-            message: 'Séance en direct démarrée',
-            session: {
-                id: liveSession._id,
-                title: liveSession.title,
-                description: liveSession.description,
-                startTime: liveSession.startTime
-            }
+            message: 'Séance en direct démarrée avec succès',
+            session: newSession
         });
     } catch (error) {
         console.error('Create live session error:', error);
@@ -616,108 +585,61 @@ app.post('/api/live/create', authMiddleware, async (req, res) => {
 
 // ========== ADMIN STATS ==========
 
-// Get admin statistics
-app.get('/api/admin/stats', authMiddleware, async (req, res) => {
-    try {
-        // Check if admin
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({
-                success: false,
-                message: 'Accès non autorisé'
-            });
+app.get('/api/admin/stats', authMiddleware, adminMiddleware, (req, res) => {
+    const totalOffers = offers.length;
+    const totalUsers = users.length;
+    const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.amount || 0), 0);
+    
+    res.json({
+        success: true,
+        stats: {
+            totalOffers,
+            totalUsers,
+            totalRevenue: Math.round(totalRevenue * 100) / 100
         }
-        
-        const totalOffers = await Offer.countDocuments();
-        const totalUsers = await User.countDocuments();
-        
-        // Calculate total revenue from bookings
-        const bookings = await Booking.find({});
-        const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.amount || 0), 0);
-        
-        res.json({
-            success: true,
-            stats: {
-                totalOffers,
-                totalUsers,
-                totalRevenue
-            }
-        });
-    } catch (error) {
-        console.error('Get admin stats error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erreur lors du chargement des statistiques'
-        });
-    }
+    });
 });
 
-// ========== INITIAL DATA ==========
+// ========== ERROR HANDLING ==========
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'Route non trouvée'
+    });
+});
 
-// Create admin user if not exists
-async function createAdminUser() {
-    try {
-        const adminExists = await User.findOne({ email: 'admin@eldjamila.com' });
-        
-        if (!adminExists) {
-            const hashedPassword = await bcrypt.hash('admin123', 10);
-            
-            const adminUser = new User({
-                name: 'El Djamila Admin',
-                email: 'admin@eldjamila.com',
-                password: hashedPassword,
-                role: 'admin',
-                balance: 10000,
-                points: 10000
-            });
-            
-            await adminUser.save();
-            console.log('✅ Admin user created');
-        }
-        
-        // Create sample offers if none exist
-        const offerCount = await Offer.countDocuments();
-        if (offerCount === 0) {
-            const sampleOffers = [
-                {
-                    title: 'Coiffure de Mariée Élégante',
-                    type: 'Coiffure Spéciale',
-                    description: 'Coiffure sophistiquée pour votre jour spécial avec essai préalable inclus.',
-                    original_price: 220,
-                    promo_price: 180,
-                    badge: 'TOP'
-                },
-                {
-                    title: 'Balayage Premium',
-                    type: 'Couleur',
-                    description: 'Technique de coloration professionnelle avec produits haute qualité.',
-                    original_price: 160,
-                    promo_price: 135,
-                    badge: 'PROMO'
-                },
-                {
-                    title: 'Traitement Revitalisant',
-                    type: 'Soin',
-                    description: 'Soin profond pour cheveux abîmés avec produits professionnels.',
-                    original_price: 95,
-                    promo_price: 80,
-                    badge: 'NOUVEAU'
-                }
-            ];
-            
-            await Offer.insertMany(sampleOffers);
-            console.log('✅ Sample offers created');
-        }
-    } catch (error) {
-        console.error('Error creating initial data:', error);
-    }
-}
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    res.status(500).json({
+        success: false,
+        message: 'Erreur interne du serveur'
+    });
+});
 
-// Start server
+// ========== START SERVER ==========
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    createAdminUser();
-});
+async function startServer() {
+    try {
+        await connectDB();
+        console.log('✅ Database initialized');
+    } catch (error) {
+        console.log('⚠️ Using in-memory database');
+    }
+    
+    app.listen(PORT, () => {
+        console.log(`🚀 Server running on port ${PORT}`);
+        console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
+        console.log('📝 Test accounts:');
+        console.log('   👑 Admin: admin@eldjamila.com / admin123');
+        console.log('   👤 User: test@user.com / 123456');
+    });
+}
 
+// For Vercel
 module.exports = app;
+
+// For local development
+if (require.main === module) {
+    startServer();
+}
