@@ -13,46 +13,40 @@
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     
     <style>
-        /* Styles pour messages */
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        
-        .error-message, .notification {
+        /* Styles pour Dynamic Island */
+        .dynamic-notification {
             position: fixed;
             top: 20px;
             right: 20px;
-            padding: 15px 20px;
-            border-radius: 8px;
+            padding: 14px 20px;
+            border-radius: 15px;
             color: white;
             z-index: 99999;
             display: flex;
             align-items: center;
             gap: 10px;
-            animation: slideIn 0.3s ease;
+            transform: translateX(120%);
+            transition: transform 0.3s ease;
             box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            max-width: 400px;
+            max-width: 350px;
+            word-wrap: break-word;
+            font-size: 14px;
         }
         
-        .error-message {
-            background: linear-gradient(135deg, #ff4444, #cc0000);
-            border-left: 5px solid #ff0000;
-        }
-        
-        .notification {
+        .dynamic-notification.success {
             background: linear-gradient(135deg, #4CAF50, #2E7D32);
-            border-left: 5px solid #2E7D32;
         }
         
-        .error-message button, .notification button {
-            background: none;
-            border: none;
-            color: white;
-            cursor: pointer;
-            font-size: 20px;
-            padding: 0;
-            margin-left: 10px;
+        .dynamic-notification.error {
+            background: linear-gradient(135deg, #ff4444, #cc0000);
+        }
+        
+        .dynamic-notification.warning {
+            background: linear-gradient(135deg, #ff9800, #f57c00);
+        }
+        
+        .dynamic-notification.info {
+            background: linear-gradient(135deg, #2196F3, #1976D2);
         }
         
         .loading-spinner {
@@ -75,6 +69,12 @@
         }
         
         .hidden {
+            display: none !important;
+        }
+        
+        /* تأكيد إخفاء زر الشحن للمستخدم العادي */
+        .user-payment .payment-input-container,
+        .user-payment #chargeBtn {
             display: none !important;
         }
     </style>
@@ -310,7 +310,8 @@
             <p class="page-description">Gérez votre solde et utilisez vos points pour payer.</p>
             
             <div class="cards-container">
-                <div class="card payment-card">
+                <div class="card payment-card user-payment" id="balanceCard">
+                    <!-- سيتم تحديث المحتوى بواسطة JavaScript -->
                     <h3>Votre solde</h3>
                     <div class="payment-amount">€<span id="userBalance">0</span></div>
                     
