@@ -1,5 +1,5 @@
 // ============================================
-// EL DJAMILA SALON - تطبيق متوافق تماماً
+// EL DJAMILA SALON - تطبيق كامل متوافق
 // الإصدار النهائي مع جميع الإصلاحات
 // ============================================
 
@@ -15,39 +15,33 @@ let liveSessions = [];
 const API_BASE_URL = window.location.origin;
 
 // ========== NOTIFICATION SYSTEM ==========
-class DynamicIsland {
+class NotificationSystem {
     constructor() {
-        this.container = document.createElement('div');
-        this.container.className = 'dynamic-island-container';
-        this.container.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 999999;
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-            gap: 10px;
-        `;
-        document.body.appendChild(this.container);
+        if (document.getElementById('dynamicIslandContainer')) {
+            this.container = document.getElementById('dynamicIslandContainer');
+        } else {
+            this.container = document.createElement('div');
+            this.container.id = 'dynamicIslandContainer';
+            this.container.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                z-index: 999999;
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                gap: 10px;
+            `;
+            document.body.appendChild(this.container);
+        }
     }
 
     show(message, type = 'info', duration = 4000) {
         const notification = document.createElement('div');
-        notification.className = `dynamic-island ${type}`;
+        notification.className = `dynamic-notification ${type}`;
         notification.style.cssText = `
-            background: ${this.getColor(type)};
-            color: white;
-            padding: 12px 20px;
-            border-radius: 20px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            display: flex;
-            align-items: center;
-            gap: 10px;
             transform: translateX(120%);
             transition: transform 0.3s ease;
-            max-width: 350px;
-            word-wrap: break-word;
         `;
 
         notification.innerHTML = `
@@ -75,16 +69,6 @@ class DynamicIsland {
         };
     }
 
-    getColor(type) {
-        const colors = {
-            success: 'linear-gradient(135deg, #4CAF50, #2E7D32)',
-            error: 'linear-gradient(135deg, #ff4444, #cc0000)',
-            warning: 'linear-gradient(135deg, #ff9800, #f57c00)',
-            info: 'linear-gradient(135deg, #2196F3, #1976D2)'
-        };
-        return colors[type] || colors.info;
-    }
-
     getIcon(type) {
         const icons = {
             success: '✓',
@@ -96,16 +80,11 @@ class DynamicIsland {
     }
 }
 
-// إنشاء نظام الإشعارات
-const dynamicIsland = new DynamicIsland();
-
-// دالة مساعدة للإشعارات
-function showNotification(message, type = 'info') {
-    dynamicIsland.show(message, type);
-}
+// Create notification system
+const notification = new NotificationSystem();
 
 // ========== API FUNCTIONS ==========
-async function apiCall(endpoint, method = 'GET', data = null) {
+async function apiCall(endpoint, method = 'GET', data = null, requiresAuth = true) {
     const url = `${API_BASE_URL}/api/${endpoint}`;
     
     const headers = {
@@ -113,7 +92,7 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     };
     
     const token = localStorage.getItem('token');
-    if (token) {
+    if (requiresAuth && token) {
         headers['Authorization'] = `Bearer ${token}`;
     }
     
@@ -127,21 +106,12 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     }
     
     try {
-        console.log(`🌐 API Call: ${method} ${url}`);
         const response = await fetch(url, options);
         
-        // التحقق من حالة 401
         if (response.status === 401) {
-            showNotification('Session expirée. Veuillez vous reconnecter.', 'error');
+            notification.show('Session expirée, veuillez vous reconnecter', 'error');
             logout();
-            throw new Error('Unauthorized');
-        }
-        
-        // التحقق من حالة 404
-        if (response.status === 404) {
-            // إذا كان الـ API غير موجود، نستخدم بيانات محلية
-            console.warn('API not found, using local data');
-            return getLocalData(endpoint);
+            throw new Error('Session expired');
         }
         
         if (!response.ok) {
@@ -149,256 +119,169 @@ async function apiCall(endpoint, method = 'GET', data = null) {
             throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
         
-        const result = await response.json();
-        return result;
+        return await response.json();
     } catch (error) {
         console.error('❌ API Error:', error);
-        
-        // إذا فشل الاتصال بالـ API، نستخدم البيانات المحلية
-        if (error.message.includes('Failed to fetch')) {
-            console.log('Using local data due to API connection failure');
-            return getLocalData(endpoint);
-        }
-        
+        notification.show(error.message || 'Erreur de connexion au serveur', 'error');
         throw error;
     }
 }
 
-// بيانات محلية احتياطية
-function getLocalData(endpoint) {
-    const data = {
-        'auth/verify': { success: false, user: null },
-        'offers': { success: true, offers: [] },
-        'live/sessions': { success: true, sessions: [] },
-        'admin/stats': { success: true, stats: { totalOffers: 0, totalUsers: 0, totalRevenue: 0 } }
-    };
-    
-    return data[endpoint] || { success: false, message: 'Endpoint not found' };
-}
-
 // ========== AUTHENTICATION ==========
-async function login() {
-    const email = document.getElementById('loginEmail').value.trim();
-    const password = document.getElementById('loginPassword').value.trim();
-    const isAdminLogin = document.getElementById('adminLogin').checked;
-
-    if (!email || !password) {
-        showNotification('Veuillez remplir tous les champs', 'error');
-        return;
-    }
-
-    const loginBtn = document.getElementById('loginBtn');
-    const originalText = loginBtn.innerHTML;
-    loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connexion...';
-    loginBtn.disabled = true;
-
+async function loginUser(email, password, isAdminLogin = false) {
     try {
-        // استخدام بيانات محلية للاختبار
-        let user;
-        if (isAdminLogin) {
-            // مسؤول
-            user = {
-                _id: 'admin001',
-                name: 'Administrateur',
-                email: email,
-                role: 'admin',
-                balance: 0,
-                points: 0,
-                createdAt: new Date()
-            };
+        const result = await apiCall('auth/login', 'POST', {
+            email,
+            password
+        }, false);
+
+        if (result.success && result.token) {
+            localStorage.setItem('token', result.token);
+            localStorage.setItem('user', JSON.stringify(result.user));
+            
+            currentUser = result.user;
+            isAdmin = result.user.role === 'admin';
+            userBalance = result.user.balance || 0;
+            userPoints = result.user.points || 0;
+            
+            notification.show('Connexion réussie!', 'success');
+            switchToMainApp();
+            
+            // Load initial data
+            await loadInitialData();
+            
+            // Update admin stats if admin
+            if (isAdmin) {
+                await updateAdminStats();
+            }
         } else {
-            // مستخدم عادي
-            user = {
-                _id: 'user001',
-                name: email.split('@')[0] || 'Utilisateur',
-                email: email,
-                role: 'user',
-                balance: 0,
-                points: 0,
-                createdAt: new Date()
-            };
+            notification.show(result.message || 'Email ou mot de passe incorrect', 'error');
         }
-
-        // حفظ في localStorage
-        const token = 'mock_token_' + Date.now();
-        localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(user));
-
-        // تحديث المتغيرات العالمية
-        currentUser = user;
-        isAdmin = user.role === 'admin';
-        userBalance = user.balance || 0;
-        userPoints = user.points || 0;
-
-        showNotification('Connexion réussie!', 'success');
-        
-        // إظهار التطبيق الرئيسي
-        showMainApp();
-        
-        // تحميل البيانات
-        await loadInitialData();
-
     } catch (error) {
         console.error('Login error:', error);
-        showNotification('Échec de connexion. Vérifiez vos identifiants.', 'error');
-    } finally {
-        loginBtn.innerHTML = originalText;
-        loginBtn.disabled = false;
     }
 }
 
-async function register() {
-    const name = document.getElementById('registerName').value.trim();
-    const email = document.getElementById('registerEmail').value.trim();
-    const password = document.getElementById('registerPassword').value.trim();
-    const confirmPassword = document.getElementById('registerConfirmPassword').value.trim();
-
-    if (!name || !email || !password || !confirmPassword) {
-        showNotification('Veuillez remplir tous les champs', 'error');
-        return;
-    }
-
-    if (password !== confirmPassword) {
-        showNotification('Les mots de passe ne correspondent pas', 'error');
-        return;
-    }
-
-    if (password.length < 6) {
-        showNotification('Le mot de passe doit contenir au moins 6 caractères', 'error');
-        return;
-    }
-
-    const registerBtn = document.getElementById('registerBtn');
-    const originalText = registerBtn.innerHTML;
-    registerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Inscription...';
-    registerBtn.disabled = true;
-
+async function registerUser(name, email, password) {
     try {
-        // إنشاء مستخدم جديد
-        const user = {
-            _id: 'user_' + Date.now(),
-            name: name,
-            email: email,
-            role: 'user',
-            balance: 0,
-            points: 0,
-            createdAt: new Date()
-        };
+        const result = await apiCall('auth/register', 'POST', {
+            name,
+            email,
+            password
+        }, false);
 
-        // حفظ في localStorage
-        const token = 'mock_token_' + Date.now();
-        localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(user));
-
-        // تحديث المتغيرات
-        currentUser = user;
-        isAdmin = false;
-        userBalance = 0;
-        userPoints = 0;
-
-        showNotification('Inscription réussie!', 'success');
-        
-        // إظهار التطبيق الرئيسي
-        showMainApp();
-        
-        // تحميل البيانات
-        await loadInitialData();
-
+        if (result.success) {
+            localStorage.setItem('token', result.token);
+            localStorage.setItem('user', JSON.stringify(result.user));
+            
+            currentUser = result.user;
+            isAdmin = result.user.role === 'admin';
+            userBalance = result.user.balance || 0;
+            userPoints = result.user.points || 0;
+            
+            notification.show('Inscription réussie!', 'success');
+            switchToMainApp();
+            await loadInitialData();
+        } else {
+            notification.show(result.message || 'Échec de l\'inscription', 'error');
+        }
     } catch (error) {
         console.error('Registration error:', error);
-        showNotification('Échec de l\'inscription', 'error');
-    } finally {
-        registerBtn.innerHTML = originalText;
-        registerBtn.disabled = false;
     }
 }
 
-async function checkAuth() {
+async function checkLoginStatus() {
     const token = localStorage.getItem('token');
     const userStr = localStorage.getItem('user');
-
+    
     if (!token || !userStr) {
         return false;
     }
-
+    
     try {
-        const user = JSON.parse(userStr);
+        const result = await apiCall('auth/verify', 'GET', null, true);
         
-        // التحقق من صلاحية الجلسة
-        currentUser = user;
-        isAdmin = user.role === 'admin';
-        userBalance = user.balance || 0;
-        userPoints = user.points || 0;
-
-        showMainApp();
-        await loadInitialData();
-        
-        return true;
+        if (result.success) {
+            currentUser = result.user;
+            isAdmin = result.user.role === 'admin';
+            userBalance = result.user.balance || 0;
+            userPoints = result.user.points || 0;
+            
+            switchToMainApp();
+            await loadInitialData();
+            
+            if (isAdmin) {
+                await updateAdminStats();
+            }
+            
+            return true;
+        }
     } catch (error) {
-        console.error('Auth check error:', error);
+        console.log('Session invalid or expired');
         logout();
         return false;
     }
 }
 
 // ========== MAIN APP FUNCTIONS ==========
-function showMainApp() {
-    // إخفاء صفحات المصادقة
+function switchToMainApp() {
+    // Hide auth pages
     document.getElementById('loginPage').classList.remove('active');
     document.getElementById('loginPage').style.display = 'none';
     document.getElementById('registerPage').classList.remove('active');
     document.getElementById('registerPage').style.display = 'none';
-
-    // إظهار التطبيق الرئيسي
+    
+    // Show main app
     document.getElementById('mainHeader').style.display = 'flex';
     document.getElementById('bottomNav').style.display = 'flex';
-
-    // تحديث معلومات المستخدم
+    
+    // Update user info
     updateUserInfo();
-
-    // الانتقال للصفحة الرئيسية
+    
+    // Go to home page
     switchPage('home');
 }
 
 function updateUserInfo() {
     if (!currentUser) return;
 
-    // تحديث الصورة الرمزية
+    // Update avatars
     const initials = currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U';
     document.getElementById('userAvatar').textContent = initials;
     document.getElementById('profileAvatar').textContent = initials;
 
-    // تحديث معلومات الملف الشخصي
+    // Update profile info
     document.getElementById('profileName').textContent = currentUser.name || 'Utilisateur';
     document.getElementById('profileEmail').textContent = currentUser.email || 'email@exemple.com';
     document.getElementById('profileNameInput').value = currentUser.name || '';
     document.getElementById('profileEmailInput').value = currentUser.email || '';
 
-    // تحديث الرصيد والنقاط
+    // Update balance and points
     document.getElementById('profileBalance').textContent = `€${userBalance}`;
     document.getElementById('profilePoints').textContent = userPoints;
 
-    // تحديث شارة المسؤول
+    // Update admin badge
     if (isAdmin) {
         document.getElementById('adminBadgeContainer').innerHTML = '<span class="admin-badge">ADMINISTRATEUR</span>';
-        
-        // إظهار عناصر المسؤول
+        // Show admin elements
         document.querySelectorAll('.admin-only').forEach(el => {
-            el.style.display = 'block';
+            el.style.display = 'flex';
         });
         document.getElementById('fabBtn').style.display = 'flex';
     } else {
         document.getElementById('adminBadgeContainer').innerHTML = '';
-        
-        // إخفاء عناصر المسؤول
+        // Hide admin elements
         document.querySelectorAll('.admin-only').forEach(el => {
             el.style.display = 'none';
         });
         document.getElementById('fabBtn').style.display = 'none';
     }
 
-    // تحديث عرض الرصيد
+    // Update balance display
     updateBalanceDisplay();
+    
+    // Update balance card based on user role
+    updateBalanceCard();
 }
 
 function updateBalanceDisplay() {
@@ -407,24 +290,60 @@ function updateBalanceDisplay() {
     document.getElementById('userPoints').textContent = userPoints;
 }
 
+function updateBalanceCard() {
+    const balanceCard = document.getElementById('balanceCard');
+    if (!balanceCard) return;
+    
+    if (isAdmin) {
+        // Admin sees charge section
+        balanceCard.innerHTML = `
+            <h3><i class="fas fa-wallet"></i> Mon Portefeuille (Admin)</h3>
+            <div class="payment-amount">€${userBalance.toFixed(2)}</div>
+            
+            <div class="payment-input-container">
+                <input type="number" class="payment-input" id="chargeAmount" placeholder="Montant" min="1" step="0.01">
+                <button class="payment-btn" id="chargeBtn">Recharger</button>
+            </div>
+            
+            <p>Vos points: <strong>${userPoints}</strong> points</p>
+            <p style="font-size: 12px; opacity: 0.9; margin-top: 8px;">1 point = €1. Utilisez vos points pour payer les prestations.</p>
+        `;
+        
+        // Add event listener for admin charge button
+        const chargeBtn = document.getElementById('chargeBtn');
+        if (chargeBtn) {
+            chargeBtn.onclick = chargeBalance;
+        }
+    } else {
+        // Regular user sees only balance (NO CHARGE SECTION)
+        balanceCard.innerHTML = `
+            <h3><i class="fas fa-wallet"></i> Mon Portefeuille</h3>
+            <div class="payment-amount">€${userBalance.toFixed(2)}</div>
+            
+            <p>Vos points: <strong>${userPoints}</strong> points</p>
+            <p style="font-size: 13px; color: rgba(255,255,255,0.8); margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2);">
+                <i class="fas fa-info-circle"></i> Contactez l'administrateur pour recharger votre compte
+            </p>
+        `;
+    }
+}
+
 // ========== PAGE NAVIGATION ==========
 function switchPage(pageId) {
-    console.log(`Switching to page: ${pageId}`);
-
-    // إخفاء جميع الصفحات
+    // Hide all pages
     document.querySelectorAll('.page').forEach(page => {
         page.classList.remove('active');
         page.style.display = 'none';
     });
 
-    // إظهار الصفحة المحددة
+    // Show selected page
     const targetPage = document.getElementById(pageId + 'Page');
     if (targetPage) {
         targetPage.classList.add('active');
         targetPage.style.display = 'block';
     }
 
-    // تحديث التنقل السفلي
+    // Update navigation
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.remove('active');
         if (item.getAttribute('data-page') === pageId) {
@@ -432,11 +351,11 @@ function switchPage(pageId) {
         }
     });
 
-    // إغلاق القائمة المنسدلة إذا كانت مفتوحة
+    // Close dropdown if open
     document.getElementById('userDropdown').classList.remove('active');
     document.getElementById('settingsMenu').classList.remove('active');
 
-    // تحميل البيانات للصفحة المحددة
+    // Load data for specific pages
     switch (pageId) {
         case 'home':
             loadHomeData();
@@ -449,6 +368,7 @@ function switchPage(pageId) {
             break;
         case 'payment':
             updateBalanceDisplay();
+            updateBalanceCard();
             break;
         case 'admin':
             if (isAdmin) {
@@ -472,12 +392,9 @@ async function loadHomeData() {
         if (result.success && result.offers && result.offers.length > 0) {
             allOffers = result.offers;
             renderHomeOffers(result.offers.slice(0, 4));
-        } else {
-            renderEmptyHomeOffers();
         }
     } catch (error) {
         console.error('Error loading home data:', error);
-        renderEmptyHomeOffers();
     }
 }
 
@@ -517,19 +434,19 @@ async function loadLiveSessions() {
 function renderHomeOffers(offers) {
     const container = document.getElementById('homeOffersContainer');
     if (!container) return;
-
+    
     if (offers.length === 0) {
         renderEmptyHomeOffers();
         return;
     }
-
-    container.innerHTML = offers.map(offer => createOfferCardHTML(offer)).join('');
+    
+    container.innerHTML = offers.map(offer => createOfferCard(offer)).join('');
 }
 
 function renderEmptyHomeOffers() {
     const container = document.getElementById('homeOffersContainer');
     if (!container) return;
-
+    
     container.innerHTML = `
         <div class="card empty-state">
             <i class="fas fa-gift"></i>
@@ -545,19 +462,19 @@ function renderEmptyHomeOffers() {
 function renderOffers(offers) {
     const container = document.getElementById('offersContainer');
     if (!container) return;
-
+    
     if (offers.length === 0) {
         renderEmptyOffers();
         return;
     }
-
-    container.innerHTML = offers.map(offer => createOfferCardHTML(offer)).join('');
+    
+    container.innerHTML = offers.map(offer => createOfferCard(offer)).join('');
 }
 
 function renderEmptyOffers() {
     const container = document.getElementById('offersContainer');
     if (!container) return;
-
+    
     container.innerHTML = `
         <div class="card empty-state">
             <i class="fas fa-gift"></i>
@@ -573,14 +490,14 @@ function renderEmptyOffers() {
     `;
 }
 
-function createOfferCardHTML(offer) {
+function createOfferCard(offer) {
     const discountPercent = offer.promo_price && offer.original_price 
         ? Math.round((1 - offer.promo_price / offer.original_price) * 100)
         : 0;
 
     return `
         <div class="card hair-service-card">
-            ${offer.badge ? `<div class="promotion-badge">${offer.badge}</div>` : ''}
+            ${offer.badge ? `<div class="${offer.badge === 'TOP' ? 'salon-badge' : 'promotion-badge'}">${offer.badge}</div>` : ''}
             
             <div class="card-image">
                 <img src="${offer.image_url || 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=500&auto=format&fit=crop'}" 
@@ -603,7 +520,7 @@ function createOfferCardHTML(offer) {
                         <div class="discount-percent">-${discountPercent}%</div>
                     ` : ''}
                     
-                    <button class="book-now-btn" onclick="bookOffer('${offer.id || offer._id || '1'}')">
+                    <button class="book-now-btn" onclick="bookOffer('${offer.id}')">
                         Réserver
                     </button>
                 </div>
@@ -615,12 +532,12 @@ function createOfferCardHTML(offer) {
 function renderLiveSessions(sessions) {
     const container = document.getElementById('liveContainer');
     if (!container) return;
-
+    
     if (sessions.length === 0) {
         renderEmptyLiveSessions();
         return;
     }
-
+    
     container.innerHTML = sessions.map(session => `
         <div class="card">
             <div class="card-header">
@@ -644,14 +561,9 @@ function renderLiveSessions(sessions) {
                         <i class="fas fa-clock"></i>
                         <span>${session.duration ? Math.round(session.duration / 60) + 'h' : 'En cours'}</span>
                     </div>
-                    <div class="meta-item">
-                        <i class="fas fa-eye"></i>
-                        <span>${session.viewers || 0} spectateurs</span>
-                    </div>
                 </div>
                 
-                <button class="btn btn-primary btn-full mt-12" 
-                        onclick="${session.status === 'active' ? 'joinLiveSession()' : 'watchReplay()'}">
+                <button class="btn btn-primary btn-full mt-12" onclick="joinLiveSession()">
                     <i class="fas fa-play btn-icon"></i>
                     ${session.status === 'active' ? 'Rejoindre la séance' : 'Voir le replay'}
                 </button>
@@ -663,7 +575,7 @@ function renderLiveSessions(sessions) {
 function renderEmptyLiveSessions() {
     const container = document.getElementById('liveContainer');
     if (!container) return;
-
+    
     container.innerHTML = `
         <div class="card empty-state">
             <i class="fas fa-video"></i>
@@ -682,7 +594,7 @@ function renderEmptyLiveSessions() {
 // ========== OFFER FUNCTIONS ==========
 function showAddOfferModal() {
     if (!isAdmin) {
-        showNotification('Accès réservé aux administrateurs', 'error');
+        notification.show('Accès réservé aux administrateurs', 'error');
         return;
     }
     
@@ -691,7 +603,7 @@ function showAddOfferModal() {
 
 async function createOffer() {
     if (!isAdmin) {
-        showNotification('Accès refusé', 'error');
+        notification.show('Accès refusé', 'error');
         return;
     }
 
@@ -704,47 +616,63 @@ async function createOffer() {
     const promoBadge = document.getElementById('promoBadge').value;
 
     if (!name || !type || !originalPrice) {
-        showNotification('Veuillez remplir tous les champs obligatoires', 'error');
+        notification.show('Veuillez remplir tous les champs obligatoires', 'error');
         return;
     }
 
     try {
-        const offerData = {
+        const result = await apiCall('offers/create', 'POST', {
             title: name,
             type: type,
             original_price: parseFloat(originalPrice),
+            promo_price: promoPrice ? parseFloat(promoPrice) : null,
             description: description,
             image_url: image || null,
             badge: promoBadge || null
-        };
-
-        if (promoPrice) {
-            offerData.promo_price = parseFloat(promoPrice);
+        });
+        
+        if (result.success) {
+            notification.show('Prestation ajoutée avec succès!', 'success');
+            await loadOffers();
+            await updateAdminStats();
+            document.getElementById('addOfferModal').classList.remove('active');
+            clearOfferForm();
         }
-
-        // حفظ محلياً (بدون API)
-        const newOffer = {
-            id: 'offer_' + Date.now(),
-            ...offerData,
-            createdAt: new Date()
-        };
-
-        allOffers.push(newOffer);
-        
-        showNotification('Prestation ajoutée avec succès!', 'success');
-        
-        // تحديث العرض
-        renderOffers(allOffers);
-        
-        // إغلاق المودال
-        document.getElementById('addOfferModal').classList.remove('active');
-        
-        // تفريغ النموذج
-        clearOfferForm();
-        
     } catch (error) {
         console.error('Create offer error:', error);
-        showNotification('Erreur lors de l\'ajout de la prestation', 'error');
+    }
+}
+
+async function bookOffer(offerId) {
+    if (!currentUser) {
+        notification.show('Veuillez vous connecter pour réserver', 'warning');
+        switchPage('profile');
+        return;
+    }
+    
+    if (!confirm('Voulez-vous vraiment réserver cette prestation?')) {
+        return;
+    }
+    
+    try {
+        const result = await apiCall('offers/book', 'POST', {
+            offerId: offerId
+        });
+        
+        if (result.success) {
+            userBalance = result.userBalance || userBalance;
+            userPoints = result.userPoints || userPoints;
+            
+            if (result.user) {
+                currentUser = result.user;
+                localStorage.setItem('user', JSON.stringify(currentUser));
+            }
+            
+            updateUserInfo();
+            notification.show('Réservation effectuée avec succès!', 'success');
+        }
+    } catch (error) {
+        console.error('Booking error:', error);
     }
 }
 
@@ -758,112 +686,52 @@ function clearOfferForm() {
     document.getElementById('promoBadge').selectedIndex = 0;
 }
 
-async function bookOffer(offerId) {
-    if (!currentUser) {
-        showNotification('Veuillez vous connecter pour réserver', 'warning');
-        switchPage('profile');
-        return;
-    }
-
-    const confirmRes = confirm('Voulez-vous vraiment réserver cette prestation?');
-    if (!confirmRes) return;
-
-    try {
-        // العثور على العرض
-        const offer = allOffers.find(o => (o.id === offerId || o._id === offerId));
-        if (!offer) {
-            showNotification('Prestation non trouvée', 'error');
-            return;
-        }
-
-        const price = offer.promo_price || offer.original_price || 0;
-        
-        // التحقق من الرصيد
-        if (userBalance < price) {
-            showNotification('Solde insuffisant. Veuillez recharger votre compte.', 'error');
-            switchPage('payment');
-            return;
-        }
-
-        // خصم السعر
-        userBalance -= price;
-        
-        // إضافة النقاط
-        const pointsEarned = Math.floor(price / 10);
-        userPoints += pointsEarned;
-
-        // تحديث بيانات المستخدم
-        if (currentUser) {
-            currentUser.balance = userBalance;
-            currentUser.points = userPoints;
-            localStorage.setItem('user', JSON.stringify(currentUser));
-        }
-
-        // تحديث العرض
-        updateUserInfo();
-        updateBalanceDisplay();
-        
-        showNotification(`Réservation confirmée! ${pointsEarned} points gagnés.`, 'success');
-
-    } catch (error) {
-        console.error('Booking error:', error);
-        showNotification('Erreur lors de la réservation', 'error');
-    }
-}
-
 // ========== LIVE SESSION FUNCTIONS ==========
 function showStartLiveModal() {
     if (!isAdmin) {
-        showNotification('Accès réservé aux administrateurs', 'error');
+        notification.show('Accès réservé aux administrateurs', 'error');
         return;
     }
     
     document.getElementById('startLiveModal').classList.add('active');
 }
 
-async function startLiveSession() {
+async function createLiveSession() {
     if (!isAdmin) {
-        showNotification('Accès refusé', 'error');
+        notification.show('Accès refusé', 'error');
         return;
     }
 
     const title = document.getElementById('liveTitle').value.trim();
     const description = document.getElementById('liveDescription').value.trim();
-
+    
     if (!title) {
-        showNotification('Veuillez saisir un titre pour votre séance', 'error');
+        notification.show('Veuillez saisir un titre pour votre séance', 'error');
         return;
     }
-
+    
     try {
-        const sessionData = {
-            id: 'live_' + Date.now(),
-            title: title,
-            description: description,
-            status: 'active',
-            viewers: 0,
-            duration: 0,
-            createdAt: new Date(),
-            createdBy: currentUser.name || 'Admin'
-        };
-
-        liveSessions.push(sessionData);
+        const result = await apiCall('live/create', 'POST', {
+            title,
+            description
+        });
         
-        showNotification('Séance en direct démarrée!', 'success');
-        
-        // تحديث العرض
-        renderLiveSessions(liveSessions);
-        
-        // إغلاق المودال
-        document.getElementById('startLiveModal').classList.remove('active');
-        
-        // تفريغ النموذج
-        clearLiveForm();
-        
+        if (result.success) {
+            notification.show('Séance en direct démarrée!', 'success');
+            await loadLiveSessions();
+            document.getElementById('startLiveModal').classList.remove('active');
+            clearLiveForm();
+        }
     } catch (error) {
         console.error('Start live error:', error);
-        showNotification('Erreur lors du démarrage de la séance', 'error');
     }
+}
+
+function joinLiveSession() {
+    notification.show('Connexion à la séance en cours...', 'info');
+    setTimeout(() => {
+        notification.show('Vous êtes maintenant connecté à la séance en direct!', 'success');
+    }, 1000);
 }
 
 function clearLiveForm() {
@@ -872,162 +740,122 @@ function clearLiveForm() {
     document.getElementById('liveSchedule').value = '';
 }
 
-function joinLiveSession() {
-    showNotification('Connexion à la séance en cours...', 'info');
-    
-    // محاكاة الاتصال
-    setTimeout(() => {
-        showNotification('Vous êtes maintenant connecté à la séance en direct!', 'success');
-    }, 1500);
-}
-
-function watchReplay() {
-    showNotification('Lecture du replay en cours...', 'info');
-    
-    setTimeout(() => {
-        showNotification('Replay chargé avec succès!', 'success');
-    }, 1000);
-}
-
-// ========== PAYMENT FUNCTIONS ==========
-async function chargeBalance() {
-    const amountInput = document.getElementById('chargeAmount');
-    if (!amountInput) return;
-
-    const amount = parseFloat(amountInput.value);
-
-    if (!amount || amount <= 0) {
-        showNotification('Veuillez saisir un montant valide', 'error');
-        return;
-    }
-
-    // للمستخدم العادي: إخفاء خيار الشحن
-    if (!isAdmin) {
-        showNotification('Le rechargement est réservé aux administrateurs', 'warning');
-        amountInput.value = '';
-        return;
-    }
-
-    try {
-        // زيادة الرصيد
-        userBalance += amount;
-        
-        // تحديث بيانات المستخدم
-        if (currentUser) {
-            currentUser.balance = userBalance;
-            localStorage.setItem('user', JSON.stringify(currentUser));
-        }
-
-        // تحديث العرض
-        updateUserInfo();
-        updateBalanceDisplay();
-        
-        // تفريغ الحقل
-        amountInput.value = '';
-        
-        showNotification(`Rechargement de €${amount.toFixed(2)} effectué!`, 'success');
-        
-    } catch (error) {
-        console.error('Charge error:', error);
-        showNotification('Erreur lors du rechargement', 'error');
-    }
-}
-
-// ========== ADMIN FUNCTIONS ==========
-function updateAdminStats() {
-    if (!isAdmin) return;
-
-    document.getElementById('totalOffers').textContent = allOffers.length;
-    document.getElementById('totalUsers').textContent = 1; // سيتغير مع API حقيقي
-    document.getElementById('totalRevenue').textContent = `€${(allOffers.length * 50).toFixed(2)}`;
-}
-
-function manageUsers() {
-    if (!isAdmin) {
-        showNotification('Accès refusé', 'error');
-        return;
-    }
-    
-    showNotification('Gestion des utilisateurs - Fonctionnalité à venir', 'info');
-}
-
-function viewStats() {
-    if (!isAdmin) {
-        showNotification('Accès refusé', 'error');
-        return;
-    }
-    
-    showNotification('Statistiques détaillées - Fonctionnalité à venir', 'info');
-}
-
 // ========== PROFILE FUNCTIONS ==========
 async function saveProfile() {
     const newName = document.getElementById('profileNameInput').value.trim();
     const newEmail = document.getElementById('profileEmailInput').value.trim();
-    const phoneInput = document.getElementById('profilePhone');
-    const phone = phoneInput ? phoneInput.value.trim() : '';
-
+    const phone = document.getElementById('profilePhone')?.value.trim() || '';
+    
     if (!newName) {
-        showNotification('Veuillez entrer votre nom', 'error');
+        notification.show('Veuillez entrer votre nom', 'error');
         return;
     }
-
+    
     try {
-        // تحديث بيانات المستخدم
-        if (currentUser) {
-            currentUser.name = newName;
-            if (newEmail) currentUser.email = newEmail;
-            if (phone) currentUser.phone = phone;
-            
+        const result = await apiCall('user/update', 'PUT', {
+            name: newName,
+            email: newEmail,
+            phone: phone
+        });
+        
+        if (result.success) {
+            currentUser = result.user;
             localStorage.setItem('user', JSON.stringify(currentUser));
-            
-            // تحديث العرض
             updateUserInfo();
-            
-            showNotification('Profil mis à jour avec succès!', 'success');
+            notification.show('Profil mis à jour avec succès!', 'success');
         }
     } catch (error) {
         console.error('Update profile error:', error);
-        showNotification('Erreur lors de la mise à jour du profil', 'error');
     }
+}
+
+// ========== PAYMENT FUNCTIONS ==========
+async function chargeBalance() {
+    const amount = parseFloat(document.getElementById('chargeAmount').value);
+    
+    if (!amount || amount <= 0) {
+        notification.show('Veuillez saisir un montant valide', 'error');
+        return;
+    }
+    
+    if (!isAdmin) {
+        notification.show('Le rechargement est réservé aux administrateurs', 'warning');
+        switchPage('home');
+        return;
+    }
+    
+    try {
+        const result = await apiCall('user/charge', 'POST', {
+            amount: amount
+        });
+        
+        if (result.success) {
+            userBalance = result.balance;
+            userPoints = result.points;
+            
+            if (result.user) {
+                currentUser = result.user;
+                localStorage.setItem('user', JSON.stringify(currentUser));
+            }
+            
+            updateUserInfo();
+            document.getElementById('chargeAmount').value = '';
+            notification.show(`Rechargement de €${amount.toFixed(2)} effectué!`, 'success');
+        }
+    } catch (error) {
+        console.error('Charge error:', error);
+    }
+}
+
+// ========== ADMIN FUNCTIONS ==========
+async function updateAdminStats() {
+    if (!isAdmin) return;
+    
+    try {
+        const result = await apiCall('admin/stats', 'GET');
+        
+        if (result.success) {
+            const stats = result.stats;
+            document.getElementById('totalOffers').textContent = stats.totalOffers || 0;
+            document.getElementById('totalUsers').textContent = stats.totalUsers || 1;
+            document.getElementById('totalRevenue').textContent = `€${stats.totalRevenue || 0}`;
+        }
+    } catch (error) {
+        console.error('Error loading admin stats:', error);
+    }
+}
+
+function manageUsers() {
+    notification.show('Gestion des utilisateurs à venir bientôt!', 'info');
+}
+
+function viewStats() {
+    notification.show('Statistiques détaillées à venir bientôt!', 'info');
 }
 
 // ========== LOGOUT FUNCTION ==========
 function logout() {
-    // مسح البيانات المحلية
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     
-    // إعادة تعيين المتغيرات
     currentUser = null;
     isAdmin = false;
     userBalance = 0;
     userPoints = 0;
-    allOffers = [];
-    liveSessions = [];
     
-    // إخفاء التطبيق الرئيسي
     document.getElementById('mainHeader').style.display = 'none';
     document.getElementById('bottomNav').style.display = 'none';
     
-    // إظهار صفحة الدخول
     document.getElementById('loginPage').style.display = 'block';
     document.getElementById('loginPage').classList.add('active');
     document.getElementById('registerPage').style.display = 'none';
     document.getElementById('registerPage').classList.remove('active');
     
-    // إخفاء جميع الصفحات
-    document.querySelectorAll('.page').forEach(page => {
-        page.classList.remove('active');
-        page.style.display = 'none';
-    });
-    
-    // تفريغ حقول الدخول
     document.getElementById('loginEmail').value = '';
     document.getElementById('loginPassword').value = '';
     document.getElementById('adminLogin').checked = false;
     
-    showNotification('Déconnexion réussie', 'success');
+    notification.show('Déconnexion réussie', 'success');
 }
 
 // ========== EVENT LISTENERS SETUP ==========
@@ -1039,30 +867,69 @@ function setupEventListeners() {
     // Switch between auth pages
     document.getElementById('goToRegister').addEventListener('click', (e) => {
         e.preventDefault();
-        document.getElementById('loginPage').style.display = 'none';
         document.getElementById('loginPage').classList.remove('active');
-        document.getElementById('registerPage').style.display = 'block';
+        document.getElementById('loginPage').style.display = 'none';
         document.getElementById('registerPage').classList.add('active');
+        document.getElementById('registerPage').style.display = 'block';
     });
     
     document.getElementById('goToLogin').addEventListener('click', (e) => {
         e.preventDefault();
-        document.getElementById('registerPage').style.display = 'none';
         document.getElementById('registerPage').classList.remove('active');
-        document.getElementById('loginPage').style.display = 'block';
+        document.getElementById('registerPage').style.display = 'none';
         document.getElementById('loginPage').classList.add('active');
+        document.getElementById('loginPage').style.display = 'block';
     });
     
     // Login button
-    document.getElementById('loginBtn').addEventListener('click', async (e) => {
-        e.preventDefault();
-        await login();
+    document.getElementById('loginBtn').addEventListener('click', async () => {
+        const email = document.getElementById('loginEmail').value.trim();
+        const password = document.getElementById('loginPassword').value.trim();
+        const isAdminLogin = document.getElementById('adminLogin').checked;
+        
+        if (!email || !password) {
+            notification.show('Veuillez remplir tous les champs', 'error');
+            return;
+        }
+        
+        document.getElementById('loginBtn').disabled = true;
+        document.getElementById('loginBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connexion...';
+        
+        await loginUser(email, password, isAdminLogin);
+        
+        document.getElementById('loginBtn').disabled = false;
+        document.getElementById('loginBtn').innerHTML = '<i class="fas fa-sign-in-alt btn-icon"></i> Se connecter';
     });
     
     // Register button
-    document.getElementById('registerBtn').addEventListener('click', async (e) => {
-        e.preventDefault();
-        await register();
+    document.getElementById('registerBtn').addEventListener('click', async () => {
+        const name = document.getElementById('registerName').value.trim();
+        const email = document.getElementById('registerEmail').value.trim();
+        const password = document.getElementById('registerPassword').value.trim();
+        const confirmPassword = document.getElementById('registerConfirmPassword').value.trim();
+        
+        if (!name || !email || !password || !confirmPassword) {
+            notification.show('Veuillez remplir tous les champs', 'error');
+            return;
+        }
+        
+        if (password !== confirmPassword) {
+            notification.show('Les mots de passe ne correspondent pas', 'error');
+            return;
+        }
+        
+        if (password.length < 6) {
+            notification.show('Le mot de passe doit contenir au moins 6 caractères', 'error');
+            return;
+        }
+        
+        document.getElementById('registerBtn').disabled = true;
+        document.getElementById('registerBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Inscription...';
+        
+        await registerUser(name, email, password);
+        
+        document.getElementById('registerBtn').disabled = false;
+        document.getElementById('registerBtn').innerHTML = '<i class="fas fa-user-plus btn-icon"></i> S\'inscrire';
     });
     
     // ========== NAVIGATION EVENT LISTENERS ==========
@@ -1072,9 +939,7 @@ function setupEventListeners() {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             const pageId = item.getAttribute('data-page');
-            if (pageId) {
-                switchPage(pageId);
-            }
+            switchPage(pageId);
         });
     });
     
@@ -1104,57 +969,10 @@ function setupEventListeners() {
         }
     });
     
-    // ========== MODAL EVENT LISTENERS ==========
-    
-    // Add Offer Modal
-    const addOfferBtn = document.getElementById('fabBtn');
-    if (addOfferBtn) {
-        addOfferBtn.addEventListener('click', () => {
-            showAddOfferModal();
-        });
-    }
-    
-    document.getElementById('cancelOfferBtn')?.addEventListener('click', () => {
-        document.getElementById('addOfferModal').classList.remove('active');
-        clearOfferForm();
+    // FAB Button
+    document.getElementById('fabBtn').addEventListener('click', () => {
+        showAddOfferModal();
     });
-    
-    document.getElementById('saveOfferBtn')?.addEventListener('click', createOffer);
-    
-    // Start Live Modal
-    document.getElementById('startLiveBtn')?.addEventListener('click', () => {
-        showStartLiveModal();
-    });
-    
-    document.getElementById('cancelLiveBtn')?.addEventListener('click', () => {
-        document.getElementById('startLiveModal').classList.remove('active');
-        clearLiveForm();
-    });
-    
-    document.getElementById('goLiveBtn')?.addEventListener('click', startLiveSession);
-    
-    // ========== OTHER EVENT LISTENERS ==========
-    
-    // Save Profile
-    document.getElementById('saveProfileBtn')?.addEventListener('click', saveProfile);
-    
-    // Charge Balance
-    document.getElementById('chargeBtn')?.addEventListener('click', chargeBalance);
-    
-    // Logout
-    document.getElementById('logoutBtn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        logout();
-    });
-    
-    document.getElementById('logoutSidebarBtn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        logout();
-    });
-    
-    // Admin buttons
-    document.getElementById('manageUsersBtn')?.addEventListener('click', manageUsers);
-    document.getElementById('viewStatsBtn')?.addEventListener('click', viewStats);
     
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1174,6 +992,50 @@ function setupEventListeners() {
         });
     });
     
+    // ========== MODAL EVENT LISTENERS ==========
+    
+    // Add Offer Modal
+    document.getElementById('cancelOfferBtn').addEventListener('click', () => {
+        document.getElementById('addOfferModal').classList.remove('active');
+        clearOfferForm();
+    });
+    
+    document.getElementById('saveOfferBtn').addEventListener('click', createOffer);
+    
+    // Start Live Modal
+    document.getElementById('startLiveBtn')?.addEventListener('click', () => {
+        showStartLiveModal();
+    });
+    
+    document.getElementById('cancelLiveBtn').addEventListener('click', () => {
+        document.getElementById('startLiveModal').classList.remove('active');
+        clearLiveForm();
+    });
+    
+    document.getElementById('goLiveBtn').addEventListener('click', createLiveSession);
+    
+    // ========== OTHER EVENT LISTENERS ==========
+    
+    // Save Profile
+    document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
+    
+    // Charge Balance (for admin - handled in updateBalanceCard)
+    
+    // Logout
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+        e.preventDefault();
+        logout();
+    });
+    
+    document.getElementById('logoutSidebarBtn').addEventListener('click', (e) => {
+        e.preventDefault();
+        logout();
+    });
+    
+    // Admin buttons
+    document.getElementById('manageUsersBtn').addEventListener('click', manageUsers);
+    document.getElementById('viewStatsBtn').addEventListener('click', viewStats);
+    
     // Close modals when clicking outside
     document.querySelectorAll('.modal').forEach(modal => {
         modal.addEventListener('click', (e) => {
@@ -1187,13 +1049,11 @@ function setupEventListeners() {
 }
 
 // ========== GLOBAL FUNCTIONS ==========
-// تصدير الدوال للاستخدام في HTML
 window.switchPage = switchPage;
 window.bookOffer = bookOffer;
 window.showAddOfferModal = showAddOfferModal;
 window.showStartLiveModal = showStartLiveModal;
 window.joinLiveSession = joinLiveSession;
-window.watchReplay = watchReplay;
 window.logout = logout;
 
 // ========== INITIALIZE APP ==========
@@ -1204,15 +1064,15 @@ document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
     
     // Check if user is already logged in
-    const isLoggedIn = checkAuth();
-    
-    if (!isLoggedIn) {
-        // Show login page by default
-        document.getElementById('loginPage').style.display = 'block';
-        document.getElementById('loginPage').classList.add('active');
-        document.getElementById('registerPage').style.display = 'none';
-        document.getElementById('registerPage').classList.remove('active');
-    }
+    checkLoginStatus().then(isLoggedIn => {
+        if (!isLoggedIn) {
+            // Show login page by default
+            document.getElementById('loginPage').style.display = 'block';
+            document.getElementById('loginPage').classList.add('active');
+            document.getElementById('registerPage').style.display = 'none';
+            document.getElementById('registerPage').classList.remove('active');
+        }
+    });
     
     console.log('✅ App started successfully');
 });
